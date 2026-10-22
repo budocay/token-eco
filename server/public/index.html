@@ -104,15 +104,19 @@ td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
       </div>
     </div>
     <section class="kpis">
-      <div class="card kpi main"><p class="label">Saved (est.)</p><div class="v" id="kDollars">–</div><div class="d" id="kDollarsSub"></div></div>
-      <div class="card kpi"><p class="label">Tokens saved</p><div class="v" id="kTokens">–</div><div class="d" id="kTokensSub"></div></div>
+      <div class="card kpi main"><p class="label">Avoided per call (est.)</p><div class="v" id="kDollars">–</div><div class="d" id="kDollarsSub"></div></div>
+      <div class="card kpi"><p class="label">Tokens avoided (est.)</p><div class="v" id="kTokens">–</div><div class="d" id="kTokensSub"></div></div>
       <div class="card kpi"><p class="label">Reduction</p><div class="v" id="kPct">–</div><div class="d" id="kPctSub"></div></div>
       <div class="card kpi"><p class="label">Tool calls</p><div class="v" id="kCalls">–</div><div class="d" id="kCallsSub"></div></div>
     </section>
-    <section class="card"><h2><span style="color:var(--text);font-size:13px;font-weight:600" id="chartTitle">Tokens saved per day</span><span id="chartInfo"></span></h2>
+    <section class="card"><h2>Real sessions <span>from the Claude Code logs · every token the model processed, extra turns included</span></h2>
+      <div class="tiles" id="realTiles"></div><div id="realRecent" style="margin-top:12px"></div>
+      <p class="note" style="margin:12px 0 0">"With token-eco" = sessions that called at least one token-eco tool. Sessions differ in their tasks:
+        compare averages over many similar sessions, or run the same task both ways (<code>server/bench/session-cost.ts</code>).</p></section>
+    <section class="card"><h2><span style="color:var(--text);font-size:13px;font-weight:600" id="chartTitle">Tokens avoided per day (est.)</span><span id="chartInfo"></span></h2>
       <div id="chart"></div><div class="legend" id="legend"></div></section>
     <div class="grid2">
-      <section class="card"><h2>By tool <span>tokens saved · reduction · calls</span></h2><div class="rows" id="tools"></div></section>
+      <section class="card"><h2>By tool <span>tokens avoided (est.) · reduction · calls</span></h2><div class="rows" id="tools"></div></section>
       <section class="card" id="sideCard"><h2 id="sideTitle">By project <span>tokens saved</span></h2><div class="rows" id="sideRows"></div></section>
     </div>
     <div class="grid2">
@@ -122,7 +126,9 @@ td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
         <p class="note" style="margin:12px 0 0">Refused = a full Read / content Grep was answered with an outline or a hint instead. Retry = the agent still asked for the original (allowed the second time).</p></section>
     </div>
     <section class="card"><h2>Recent calls <input class="search" id="q" placeholder="Filter: tool, project, file…" autocomplete="off"></h2><div id="recent"></div></section>
-    <p class="note">All figures are estimates (assumed size of the equivalent built-in tool output), not an invoice.</p>
+    <p class="note">Except "Real sessions", all figures are per-call estimates: what each token-eco call returned vs the assumed
+      size of the equivalent built-in call (e.g. a whole-file Read). The real agent often reads more sparingly, and extra
+      turns are not counted there: use "Real sessions" for actual usage.</p>
   </main>
 </div>
 <script>
@@ -195,7 +201,7 @@ function chart() {
     svg += `<text x="${i * step + step / 2}" y="${H - 4}" font-size="10" fill="var(--faint)" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">${days[i].slice(5)}</text>`;
   }
   $("chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${svg}</svg>`;
-  $("chartTitle").textContent = `Tokens saved per day, by ${data.stack.by}`;
+  $("chartTitle").textContent = `Tokens avoided per day (est.), by ${data.stack.by}`;
   $("chartInfo").textContent = `${totals.filter(Boolean).length} active day(s) · ${tok(totals.reduce((a, b) => a + b, 0))} tokens`;
   $("legend").innerHTML = keys.map((k) => `<button data-k="${esc(k)}" class="${state.hidden.has(k) ? "off" : ""}" style="--c:${keyColor(k)}">
     <i></i>${esc(data.stack.by === "project" ? base(k) : k)}</button>`).join("");
@@ -206,7 +212,7 @@ $("legend").onclick = (e) => { const b = e.target.closest("button"); if (!b) ret
 function renderRecent() {
   const list = data.recent.filter((x) => !state.q || `${x.tool} ${x.project} ${x.details ?? ""}`.toLowerCase().includes(state.q));
   $("recent").innerHTML = list.length ? `<table><colgroup><col style="width:120px"><col style="width:90px"><col><col><col style="width:80px"><col style="width:80px"><col style="width:80px"></colgroup>
-    <tr><th>When</th><th>Tool</th><th>Project</th><th>Detail</th><th class="n">Returned</th><th class="n">Native</th><th class="n">Saved</th></tr>
+    <tr><th>When</th><th>Tool</th><th>Project</th><th>Detail</th><th class="n">Returned</th><th class="n">Native (est.)</th><th class="n">Avoided</th></tr>
     ${list.map((x) => { const g = x.native - x.returned; let det = ""; try { const o = JSON.parse(x.details || "{}"); det = o.file ?? o.pattern ?? o.command ?? ""; } catch {}
       return `<tr><td title="${esc(x.ts)}">${esc(ago(x.ts))}</td><td>${esc(x.tool)}</td>
       <td title="${esc(x.project)}"><span class="tag" style="--c:${colorOf(x.project)}"><i></i>${esc(base(x.project))}</span></td><td title="${esc(det)}">${esc(det)}</td>
@@ -237,28 +243,45 @@ function render() {
   chart();
   bars($("tools"), d.byTool, (k) => k);
   if (cur) {
-    $("sideTitle").innerHTML = `Days <span>tokens saved, most recent first</span>`;
+    $("sideTitle").innerHTML = `Days <span>tokens avoided (est.), most recent first</span>`;
     bars($("sideRows"), [...d.byDay].reverse().map((x) => ({ ...x, key: x.day })), (k) => k);
   } else {
-    $("sideTitle").innerHTML = `By project <span>tokens saved · reduction · calls</span>`;
+    $("sideTitle").innerHTML = `By project <span>tokens avoided (est.) · reduction · calls</span>`;
     bars($("sideRows"), d.byProject, base, colorOf);
   }
   const m = p.models.find((x) => x.key === p.model);
   $("priceChecked").textContent = `$/MTok · checked ${p.checked}`;
   $("prices").innerHTML = [["Input", m.input], ["Cache write (5 min)", m.cacheWrite5m], ["Cache read", m.cacheRead], ["Output", m.output]]
     .map(([n, v]) => `<div><b>$${v}</b><small>${n}</small></div>`).join("");
-  $("formula").innerHTML = `1 saved token is worth <b style="color:var(--text)">$${p.rate.toFixed(2)}/MTok</b> here: ${esc(p.formula)}.
+  $("formula").innerHTML = `1 avoided token is worth <b style="color:var(--text)">$${p.rate.toFixed(2)}/MTok</b> here: ${esc(p.formula)}.
     A tool result is written to the prompt cache once, then re-read on every later turn. Source: <a href="${esc(p.source)}" target="_blank" rel="noopener">Anthropic pricing</a>.`;
   const h = d.redirections[state.days === 7 ? "week" : "total"];
   $("hook").innerHTML = `<div><b>${nf.format(h.refused)}</b><small>refused, outline given</small></div>
     <div><b>${nf.format(h.fallbacks)}</b><small>retried${h.refused ? ` (${Math.round(h.fallbacks / h.refused * 100)}%)` : ""}</small></div>`;
   renderRecent();
 }
+
+function renderSessions(s) {
+  const g = (x, name) => x.sessions
+    ? `<div><b>${tok(x.tokensPerTurn)}</b><small>${name}: tokens / turn · ${nf.format(x.sessions)} session(s) · ${tok(x.tokens / x.sessions)} tok and ${usd(x.costPerSession)} / session</small></div>`
+    : `<div><b>–</b><small>${name}: no session</small></div>`;
+  $("realTiles").innerHTML = g(s.withEco, "With token-eco") + g(s.withoutEco, "Without");
+  $("realRecent").innerHTML = s.recent.length ? `<table><colgroup><col style="width:120px"><col><col style="width:70px"><col style="width:90px"><col style="width:80px"><col style="width:80px"></colgroup>
+    <tr><th>When</th><th>Project</th><th class="n">Turns</th><th class="n">Tokens</th><th class="n">Cost</th><th class="n">eco calls</th></tr>
+    ${s.recent.slice(0, 10).map((x) => `<tr><td title="${esc(x.end)}">${esc(ago(x.end))}</td>
+      <td title="${esc(x.project)}">${esc(base(x.project))}</td><td class="n">${nf.format(x.turns)}</td>
+      <td class="n">${tok(x.tokens)}</td><td class="n">${usd(x.cost)}</td><td class="n">${nf.format(x.ecoCalls)}</td></tr>`).join("")}</table>`
+    : `<div class="empty">No Claude Code session log in this period.</div>`;
+}
+async function loadSessions(qs) {
+  try { renderSessions(await (await fetch(`/api/sessions?${qs}`)).json()); } catch { /* the estimates still show */ }
+}
 $("projects").onclick = (e) => { const b = e.target.closest("button"); if (b) pick(b.dataset.p); };
 
 async function load() {
   try {
     const qs = new URLSearchParams({ days: String(state.days), ...(state.project ? { project: state.project } : {}), ...(state.model ? { model: state.model } : {}) });
+    loadSessions(new URLSearchParams({ days: String(state.days), ...(state.project ? { project: state.project } : {}) }));
     data = await (await fetch(`/api/stats?${qs}`)).json();
     if (state.project && !data.projects.some((x) => x.key === state.project)) return pick("");
     $("updated").textContent = `updated ${new Date().toLocaleTimeString("en-US")}`;

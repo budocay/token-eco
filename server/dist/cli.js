@@ -283,6 +283,143 @@ init_pricing();
 // src/tokens.ts
 var CHARS_PER_TOKEN = 4;
 
+// src/sessions.ts
+init_pricing();
+import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join3, resolve } from "node:path";
+var projectsDir = () => join3(process.env.CLAUDE_CONFIG_DIR ?? join3(homedir2(), ".claude"), "projects");
+var encodeProject = (dir) => resolve(dir).replace(/[^a-zA-Z0-9]/g, "-");
+var ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
+function priceFor(model, forced) {
+  if (forced) return PRICES[forced];
+  return PRICES[model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2")];
+}
+function emptyTotals(id = "", project = "") {
+  return {
+    id,
+    project,
+    start: "",
+    end: "",
+    model: "",
+    turns: 0,
+    subagentTurns: 0,
+    input: 0,
+    write5m: 0,
+    write1h: 0,
+    cacheRead: 0,
+    output: 0,
+    tokens: 0,
+    cost: 0,
+    peakContext: 0,
+    ecoCalls: 0,
+    tools: {},
+    unpriced: []
+  };
+}
+function addLog(t, file, isSub, opts2 = {}) {
+  const seenMsg = /* @__PURE__ */ new Set(), seenTool = /* @__PURE__ */ new Set();
+  for (const line of readFileSync2(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let o;
+    try {
+      o = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isSub && o.cwd && !t.project) t.project = o.cwd;
+    if (o.timestamp) {
+      if (!t.start || o.timestamp < t.start) t.start = o.timestamp;
+      if (o.timestamp > t.end) t.end = o.timestamp;
+    }
+    const m = o.message;
+    if (o.type !== "assistant" || !m) continue;
+    for (const c of Array.isArray(m.content) ? m.content : []) {
+      if (c?.type === "tool_use" && !seenTool.has(c.id)) {
+        seenTool.add(c.id);
+        if (ECO_TOOL.test(c.name)) t.ecoCalls++;
+        const key = (isSub ? "sub:" : "") + String(c.name).replace(ECO_TOOL, "eco:");
+        t.tools[key] = (t.tools[key] ?? 0) + 1;
+      }
+    }
+    const u = m.usage;
+    if (!u || !m.id || seenMsg.has(m.id) || m.model === "<synthetic>") continue;
+    seenMsg.add(m.id);
+    let w1h = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+    const w5m = u.cache_creation ? u.cache_creation.ephemeral_5m_input_tokens ?? 0 : u.cache_creation_input_tokens ?? 0;
+    const inp = u.input_tokens ?? 0, out = u.output_tokens ?? 0;
+    let read = u.cache_read_input_tokens ?? 0;
+    if (opts2.cold && !isSub && seenMsg.size === 1) {
+      w1h += read;
+      read = 0;
+    }
+    t.input += inp;
+    t.write5m += w5m;
+    t.write1h += w1h;
+    t.cacheRead += read;
+    t.output += out;
+    t.tokens += inp + w5m + w1h + read + out;
+    if (isSub) t.subagentTurns++;
+    else {
+      t.turns++;
+      t.peakContext = Math.max(t.peakContext, inp + w5m + w1h + read);
+      t.model ||= m.model;
+    }
+    const p = priceFor(m.model, opts2.model);
+    if (!p) {
+      if (!t.unpriced.includes(m.model)) t.unpriced.push(m.model);
+      continue;
+    }
+    t.cost += (inp * p.input + w5m * p.cacheWrite5m + w1h * 2 * p.input + read * p.cacheRead + out * p.output) / 1e6;
+  }
+}
+function subagentLogs(mainLog) {
+  const d = join3(mainLog.replace(/\.jsonl$/, ""), "subagents");
+  return existsSync2(d) ? readdirSync(d).filter((f) => f.endsWith(".jsonl")).map((f) => join3(d, f)) : [];
+}
+function sessionTotals(mainLog, opts2 = {}) {
+  const t = emptyTotals(mainLog.split(/[\\/]/).pop().replace(/\.jsonl$/, ""));
+  addLog(t, mainLog, false, opts2);
+  for (const f of subagentLogs(mainLog)) addLog(t, f, true, opts2);
+  return t;
+}
+var cache = /* @__PURE__ */ new Map();
+function listSessions(scope = {}, root = projectsDir()) {
+  if (!existsSync2(root)) return [];
+  const since = scope.days ? Date.now() - scope.days * 864e5 : 0;
+  const dirs = scope.project ? [encodeProject(scope.project)] : readdirSync(root);
+  const out = [];
+  for (const d of dirs) {
+    const dir = join3(root, d);
+    let files;
+    try {
+      files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      const path = join3(dir, f);
+      const st = statSync(path);
+      if (st.mtimeMs < since) continue;
+      const key = `${st.mtimeMs}|${st.size}`;
+      let hit = cache.get(path);
+      if (!hit || hit.key !== key) {
+        hit = { key, t: sessionTotals(path) };
+        cache.set(path, hit);
+      }
+      if (hit.t.turns && (!scope.project || resolve(hit.t.project) === resolve(scope.project))) out.push(hit.t);
+    }
+  }
+  return out.sort((a, b) => b.end.localeCompare(a.end));
+}
+function compareSessions(list) {
+  const group = (l) => {
+    const turns = l.reduce((s, x) => s + x.turns + x.subagentTurns, 0), tokens = l.reduce((s, x) => s + x.tokens, 0), cost = l.reduce((s, x) => s + x.cost, 0);
+    return { sessions: l.length, turns, tokens, cost, tokensPerTurn: turns ? Math.round(tokens / turns) : 0, costPerSession: l.length ? cost / l.length : 0 };
+  };
+  return { withEco: group(list.filter((s) => s.ecoCalls > 0)), withoutEco: group(list.filter((s) => s.ecoCalls === 0)) };
+}
+
 // src/stats.ts
 function formatTokens(n) {
   const a = Math.abs(n);
@@ -329,8 +466,21 @@ var pct = (a) => a.native ? Math.round(a.saved / a.native * 100) : 0;
 function summaryText() {
   const s = statistics();
   const line = (name, a) => `${name.padEnd(9)} ${formatTokens(a.saved).padStart(8)} tokens  ${formatUsd(a.dollars).padStart(9)}  (\u2212${pct(a)}%, ${a.calls} call${a.calls === 1 ? "" : "s"})`;
+  let real = [];
+  try {
+    const { withEco: w, withoutEco: o } = compareSessions(listSessions({ days: 7 }));
+    const g = (name, x) => x.sessions ? `  ${name.padEnd(16)} ${String(x.sessions).padStart(3)} session(s)  ${formatTokens(x.tokensPerTurn).padStart(7)} tokens/turn  ${formatTokens(x.tokens / x.sessions).padStart(7)} tokens  ${formatUsd(x.costPerSession).padStart(7)} per session` : `  ${name.padEnd(16)}   \u2013 no session`;
+    real = [
+      "",
+      "Real sessions, last 7 days (Claude Code logs, everything the model processed):",
+      g("With token-eco", w),
+      g("Without", o),
+      "  (different tasks: compare over many sessions, or bench/session-cost.ts on the same task)"
+    ];
+  } catch {
+  }
   return [
-    "token-eco \u2014 ESTIMATED savings",
+    "token-eco \u2014 ESTIMATED tokens avoided per call (vs the assumed built-in call; extra turns not counted)",
     line("Today", s.today),
     line("7 days", s.week),
     line("Total", s.total),
@@ -342,8 +492,9 @@ function summaryText() {
     ...s.byProject.slice(0, 8).map((o) => `  ${(o.key.split(/[\\/]/).filter(Boolean).pop() ?? o.key).padEnd(16)} ${formatTokens(o.saved).padStart(8)} tokens  ${formatUsd(o.dollars).padStart(9)}`),
     "",
     (({ refused, fallbacks }) => `Hook (total): ${refused} built-in Read/Grep redirected, ${fallbacks} allowed on retry`)(s.redirections.total),
+    ...real,
     "",
-    `Pricing: ${s.pricing.label}, $${s.pricing.rate.toFixed(2)}/MTok saved (${s.pricing.formula}; prices checked ${s.pricing.checked}).`,
+    `Pricing: ${s.pricing.label}, $${s.pricing.rate.toFixed(2)}/MTok avoided (${s.pricing.formula}; prices checked ${s.pricing.checked}).`,
     `Change "model" / "laterTurns" in ~/.token-eco/config.json.`,
     s.estimate
   ].join("\n");
@@ -378,6 +529,14 @@ function startServer(port2) {
           days: Number.isInteger(days) && days > 0 && days <= 3650 ? days : null,
           model: url.searchParams.get("model") ?? void 0
         });
+        res.writeHead(200, { ...HEADERS, "Content-Type": "application/json" }).end(JSON.stringify(body));
+      } else if (req.method === "GET" && url.pathname === "/api/sessions") {
+        const days = Number(url.searchParams.get("days"));
+        const list = listSessions({
+          project: url.searchParams.get("project") ?? void 0,
+          days: Number.isInteger(days) && days > 0 && days <= 3650 ? days : 90
+        });
+        const body = { ...compareSessions(list), recent: list.slice(0, 30).map(({ tools, unpriced, ...s }) => s) };
         res.writeHead(200, { ...HEADERS, "Content-Type": "application/json" }).end(JSON.stringify(body));
       } else if (req.method === "GET" && url.pathname === "/api/ping") {
         res.writeHead(200, HEADERS).end("token-eco");

@@ -273,3 +273,33 @@ test("edit not found: closest passage (indentation, distinctive line, shared wor
   assert.equal(await readFile(join(dir, "a.py"), "utf8"), text); // all or nothing
   await rm(dir, { recursive: true, force: true });
 });
+
+test("sessions: real usage from Claude Code logs (dedup by message id, subagents, eco vs not)", async () => {
+  const { listSessions, compareSessions, encodeProject } = await import("../src/sessions.ts");
+  const { mkdir } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "token-eco-logs-"));
+  const proj = "/tmp/some-project", dir = join(root, encodeProject(proj));
+  await mkdir(join(dir, "s1", "subagents"), { recursive: true });
+  const usage = { input_tokens: 10, cache_read_input_tokens: 1000, cache_creation_input_tokens: 100,
+    cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 100 }, output_tokens: 50 };
+  const msg = (id: string, content: unknown[], ts: string) => JSON.stringify({ type: "assistant", cwd: proj, timestamp: ts,
+    message: { id, model: "claude-sonnet-5-5", usage, content } });
+  await writeFile(join(dir, "s1.jsonl"), [
+    msg("m1", [{ type: "tool_use", id: "t1", name: "mcp__plugin_token-eco_token-eco__read", input: {} }], "2026-01-01T10:00:00Z"),
+    msg("m1", [{ type: "text", text: "same message, second line" }], "2026-01-01T10:00:01Z"),
+    msg("m2", [], "2026-01-01T10:01:00Z"),
+  ].join("\n"));
+  await writeFile(join(dir, "s1", "subagents", "a.jsonl"), msg("m3", [{ type: "tool_use", id: "t2", name: "Bash", input: {} }], "2026-01-01T10:00:30Z"));
+  await writeFile(join(dir, "s2.jsonl"), msg("m4", [{ type: "tool_use", id: "t3", name: "Read", input: {} }], "2026-01-02T10:00:00Z"));
+  const list = listSessions({ project: proj }, root);
+  assert.equal(list.length, 2);
+  assert.equal(list[0].id, "s2"); // most recent first
+  const s1 = list[1];
+  assert.equal(s1.turns, 2); assert.equal(s1.subagentTurns, 1); assert.equal(s1.ecoCalls, 1);
+  assert.equal(s1.tokens, 3 * 1160);
+  assert.ok(Math.abs(s1.cost - 3 * (10 * 2 + 100 * 4 + 1000 * 0.1 + 50 * 10) / 1e6) < 1e-9);
+  const c = compareSessions(list);
+  assert.equal(c.withEco.sessions, 1); assert.equal(c.withoutEco.sessions, 1);
+  assert.equal(c.withEco.tokensPerTurn, Math.round(3 * 1160 / 3)); // 2 main + 1 subagent turn
+  await rm(root, { recursive: true, force: true });
+});

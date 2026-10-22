@@ -22,9 +22,11 @@ achieve). It brings:
 tokens per turn in a real session), so the number of calls drives the cost more than the size of each result.
 All tools accept batches, and the session guidance asks for them.
 
-**Default mode (since 0.5)**: your usual agent keeps its built-in tools and gets the token-eco tools plus a 5-line
-guidance injected at session start; the prompt prefix stays the same as in your other sessions, so the prompt cache
-is shared. **Strict agent `eco`** (opt-in: `claude --agent token-eco:eco`): no built-in Read/Grep/Glob/Edit/NotebookEdit, and
+**Default: strict main agent `eco`** (`settings.json` → `"agent": "token-eco:eco"`). In the real-session runs it
+processed 6-10% fewer tokens than plain Claude Code (smaller context, fewer cache reads), while the "tools only" mode
+did not (see Benchmarks); the dollar cost was about the same because it wrote more output. To use your usual agent
+instead (it still gets the tools, the 5-line session guidance and the hook), remove the `"agent"` line from the
+plugin's `settings.json`. The `eco` agent has no built-in Read/Grep/Glob/Edit/NotebookEdit, and
 none of the rarely used automation/remote tools (Cron*, DesignSync, worktrees, PushNotification, RemoteTrigger,
 ReportFindings, ScheduleWakeup, SendMessage, Workflow, ListAgents). Measured: running as a custom agent costs ~5K extra
 prompt tokens per session; with these removals the eco prefix is 39.3K tokens vs 40.0K for plain Claude Code (44.2K
@@ -59,13 +61,16 @@ Restart Claude Code and check with `/mcp` that the `token-eco` server is connect
 
 ## Usage
 
-- `/eco-stats`: terminal summary (today, 7 days, total, per tool, per project).
+- `/eco-stats`: terminal summary: per-call estimates (today, 7 days, total, per tool, per project) and the **real
+  sessions** of the last 7 days from the Claude Code logs (tokens per turn and per session, with vs without token-eco).
 - `/eco-dashboard`: starts the dashboard on `http://127.0.0.1:4777` and opens the browser.
 - `/eco-statusline`: savings in the Claude Code status line.
 - Outside Claude Code: `node server/dist/cli.js <stats|statusline|dashboard|serve|stop>`.
 
 **Dashboard**: project sidebar (all projects, or one, sorted by last activity, one colour each), period 7d/30d/90d/All,
-model selector for pricing, KPIs (dollars, tokens, reduction, calls), daily chart stacked by project (or by tool inside a
+model selector for pricing, KPIs (per-call estimates: dollars, tokens avoided, reduction, calls), a **Real sessions**
+card (actual tokens per turn / per session and cost from the Claude Code logs, with vs without token-eco, recent
+sessions), daily chart stacked by project (or by tool inside a
 project) with a clickable legend, per-tool and per-project bars, pricing card, hook counters, filterable recent calls.
 Light/dark/auto theme. Listens on 127.0.0.1 only and rejects foreign `Host` headers.
 
@@ -122,8 +127,12 @@ same prompts, warm cache, 9 hidden acceptance checks. Cost vs plain Claude Code:
 | 3 (v0.5.0) | 0% | −5% |
 | 4 (v0.5.1) | +22% | +6% |
 
-Every session passed 9/9. **Honest conclusion: no measurable saving on real sessions with Sonnet 5.5.** Plain
-Sonnet already reads sparingly (`grep -A`, `sed -n` chained in one Bash call); the cost is driven by the number
+Every session passed 9/9. Tokens actually processed (all cache reads/writes + output): the strict agent used
+−10% (run 3) and −6% (run 4); the tools-only mode +4% and +29%.
+
+**Honest conclusion: no measurable dollar saving on real sessions with Sonnet 5.5; a modest token saving with the
+strict agent (2 runs, to confirm).** Cache reads are cheap ($0.10/MTok) so fewer tokens barely move the bill, but
+they matter for subscription limits and context length. Plain Sonnet already reads sparingly (`grep -A`, `sed -n` chained in one Bash call); the cost is driven by the number
 of turns, which the plugin does not reduce reliably, and session-to-session variance (±15%) is larger than any
 effect. Where it measurably helps: short targeted tasks (−10% in the A/B above), very long test/build outputs
 (Bash compaction), full reads of very large files (redirected to an outline), and the usage dashboard.

@@ -4,6 +4,7 @@ import {
 import { readConfig, toDollars, type Config } from "./config.ts";
 import { PRICES, PRICES_CHECKED, PRICES_SOURCE, savedTokenRate } from "./pricing.ts";
 import { CHARS_PER_TOKEN } from "./tokens.ts";
+import { compareSessions, listSessions, type SessionGroup } from "./sessions.ts";
 
 type WithDollars<T> = T & { dollars: number };
 
@@ -59,8 +60,17 @@ export function summaryText(): string {
   const s = statistics();
   const line = (name: string, a: WithDollars<Aggregate>) =>
     `${name.padEnd(9)} ${formatTokens(a.saved).padStart(8)} tokens  ${formatUsd(a.dollars).padStart(9)}  (−${pct(a)}%, ${a.calls} call${a.calls === 1 ? "" : "s"})`;
+  let real: string[] = [];
+  try {
+    const { withEco: w, withoutEco: o } = compareSessions(listSessions({ days: 7 }));
+    const g = (name: string, x: SessionGroup) => x.sessions
+      ? `  ${name.padEnd(16)} ${String(x.sessions).padStart(3)} session(s)  ${formatTokens(x.tokensPerTurn).padStart(7)} tokens/turn  ${formatTokens(x.tokens / x.sessions).padStart(7)} tokens  ${formatUsd(x.costPerSession).padStart(7)} per session`
+      : `  ${name.padEnd(16)}   – no session`;
+    real = ["", "Real sessions, last 7 days (Claude Code logs, everything the model processed):",
+      g("With token-eco", w), g("Without", o), "  (different tasks: compare over many sessions, or bench/session-cost.ts on the same task)"];
+  } catch { /* logs unreadable: estimates only */ }
   return [
-    "token-eco — ESTIMATED savings",
+    "token-eco — ESTIMATED tokens avoided per call (vs the assumed built-in call; extra turns not counted)",
     line("Today", s.today),
     line("7 days", s.week),
     line("Total", s.total),
@@ -72,8 +82,9 @@ export function summaryText(): string {
     ...s.byProject.slice(0, 8).map((o) => `  ${(o.key.split(/[\\/]/).filter(Boolean).pop() ?? o.key).padEnd(16)} ${formatTokens(o.saved).padStart(8)} tokens  ${formatUsd(o.dollars).padStart(9)}`),
     "",
     (({ refused, fallbacks }) => `Hook (total): ${refused} built-in Read/Grep redirected, ${fallbacks} allowed on retry`)(s.redirections.total),
+    ...real,
     "",
-    `Pricing: ${s.pricing.label}, $${s.pricing.rate.toFixed(2)}/MTok saved (${s.pricing.formula}; prices checked ${s.pricing.checked}).`,
+    `Pricing: ${s.pricing.label}, $${s.pricing.rate.toFixed(2)}/MTok avoided (${s.pricing.formula}; prices checked ${s.pricing.checked}).`,
     `Change "model" / "laterTurns" in ~/.token-eco/config.json.`,
     s.estimate,
   ].join("\n");
