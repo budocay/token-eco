@@ -3,7 +3,8 @@
 A personal Claude Code plugin that cuts token usage. It brings:
 
 - an **MCP server** of token-saving file tools;
-- a main **agent** `eco` that uses them (plus `eco-explore`, a cheap read-only explorer on Haiku);
+- a short **session guidance** (SessionStart hook) so the default agent uses them and batches its calls;
+- an opt-in strict agent `eco` (plus `eco-explore`, a cheap read-only explorer on Haiku);
 - a **PreToolUse hook** for every agent: compact Bash output, expensive Read/Grep calls redirected;
 - a **local web dashboard**, per project, and a terminal summary of the (**estimated**) savings.
 
@@ -11,12 +12,18 @@ A personal Claude Code plugin that cuts token usage. It brings:
 
 | Tool | What it does | "Native" reference used for the estimate |
 |---|---|---|
-| `read` | `name` → that symbol's code (doc, `template <…>`, overloads; definition preferred over prototype); `start`/`end` → range; nothing → whole file if short, else an outline; `targets` → up to 20 reads in one call (cap ≈ 10K tokens) | whole file / Read of the same range |
-| `search` | regex grouped by file, exact totals; `mode` `lines`/`files`/`count`; `symbols: true` → each hit labelled with its enclosing function/class (`› name L12-30`); no `pattern` + `glob` = file list | same lines in `grep -rn` format (or Grep `files_with_matches`/`count`) |
+| `read` | `name` → that symbol's code (doc, `template <…>`, overloads; definition preferred over prototype); `start`/`end` → range; `pattern` → matching lines of the file with context; nothing → whole file if short, else an outline; `targets` → up to 20 reads in one call (cap ≈ 10K tokens) | whole file / Read of the same range |
+| `search` | regex grouped by file, exact totals; `mode` `lines`/`files`/`count`; `symbols: true` → each hit labelled with its enclosing function/class (`› name L12-30`); `expand: true` → the whole enclosing function/class of each hit (≤ 150 lines each, ≈ 6K tokens per search): search + read in one call; `queries` → up to 10 searches in one call; no `pattern` + `glob` = file list | same lines in `grep -rn` format (+ Read of the expanded ranges) |
 | `edit` | N exact replacements (`old_string`/`new_string`/`replace_all`) in one call, all or nothing | snippets returned by N native `Edit` calls |
 | `eco_report` | savings summary; `dashboard: true` starts the dashboard | – |
 
-**Main agent `eco`** (`settings.json` → `"agent": "token-eco:eco"`): no built-in Read/Grep/Glob/Edit/NotebookEdit, and
+**Why batching**: every tool call is a full turn that re-reads the whole context from the prompt cache (≈ 75K
+tokens per turn in a real session), so the number of calls drives the cost more than the size of each result.
+All tools accept batches, and the session guidance asks for them.
+
+**Default mode (since 0.5)**: your usual agent keeps its built-in tools and gets the token-eco tools plus a 5-line
+guidance injected at session start; the prompt prefix stays the same as in your other sessions, so the prompt cache
+is shared. **Strict agent `eco`** (opt-in: `claude --agent token-eco:eco`): no built-in Read/Grep/Glob/Edit/NotebookEdit, and
 none of the rarely used automation/remote tools (Cron*, DesignSync, worktrees, PushNotification, RemoteTrigger,
 ReportFindings, ScheduleWakeup, SendMessage, Workflow, ListAgents). Measured: running as a custom agent costs ~5K extra
 prompt tokens per session; with these removals the eco prefix is 39.3K tokens vs 40.0K for plain Claude Code (44.2K
@@ -26,9 +33,12 @@ back, delete it from `disallowedTools` in `agents/eco.md`. `alwaysLoad: true`: t
 ## Hook (every agent, including yours)
 
 - **Compact Bash output**: tests, builds, installs and git commands are transparently rewritten to `server/dist/run.js`
-  (exit code kept; errors and failures always kept). Also handles `cd x && cmd`, `cmd 2>&1 | tail -N`, `cmd | head -N`.
-  Permissions are respected: deny rule → nothing rewritten; allow rule (or git status/log/diff/show) → allowed;
-  otherwise Claude Code asks as usual. Other compound commands and watch/dev modes are left alone.
+  (exit code kept; errors and failures always kept). Detects tools run through `.venv/bin/`, `node_modules/.bin/`,
+  `uv run`/`poetry run`, `python -m`. In lists like `cd x && pytest -q; git status` (`;`, `&&`, `||`), each noisy
+  part is rewritten and the others kept verbatim; `| tail -N`, `| head -N` and `2>&1` are handled.
+  Permissions are respected: a deny rule on any part → nothing rewritten; every part allowed (or git
+  status/log/diff/show, `cd`) → allowed; otherwise Claude Code asks as usual. Anything with `$(…)`, backticks,
+  heredocs, `( )`/`{ }`, loops/conditions, background `&` or watch/dev modes is left alone.
 - **Read of a big file** (> 300 lines, no offset/limit) → refused once, and the message contains the outline (no wasted
   turn). **Grep in `content` mode** → refused once, pointing to `search`. The same call repeated within 10 minutes goes
   through, so an agent without the token-eco tools is never blocked.
@@ -98,6 +108,13 @@ same tasks in `claude -p` with and without the plugin and compares real cost, co
 `server/bench/AB.md`. Disable the installed plugin first. Results (Sonnet): v0.3 (t1-t5 × 4) eco −8% cost
 (≈ −10% without the cold-cache bias, now removed by an uncounted warmup; `--no-warmup` to skip it); v0.4.1 (t4, t5 × 4)
 −10% cost, 16/16 successes, −20% context. Floor ≈ −10% on short tasks (fixed prompt cost).
+
+**Real sessions** (`node bench/session-cost.ts <dir> <dir>… [--latest] [--cold]`: real cost from the Claude Code
+session logs, subagents included; `--cold` removes the warm-cache bias of the first turn). A 6-step session on
+click 8.5.0 (explore, fix a bug, add a type, rename across files, review with a subagent, changelog), Sonnet,
+v0.4 strict agent vs plain Claude Code: +17% then −7% over two runs, both 9/9 correct — no clear gain: plain
+Sonnet already reads sparingly (`grep -A`, `sed -n` chained in one Bash call) and the turn count, which drives the
+cost, stayed the same. Version 0.5 targets the turn count (batched `search`, `expand`, guidance, default mode).
 
 ## Development
 

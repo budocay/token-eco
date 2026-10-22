@@ -4,7 +4,7 @@
  *   node bench/session-cost.ts <project dir | session.jsonl> [more…] [--model claude-sonnet-5.5] [--latest] [--cold]
  * --latest: only the most recent session of each project (skips warmup sessions);
  * --cold: count the first turn's cache read as a cache write (same cold start for every session).
- * With two arguments, the second is compared with the first (delta %).
+ * Every argument after the first is compared with the first one (delta %).
  * Assumptions: an assistant message logged on several lines is counted once (by message.id);
  * 1-hour cache writes cost 2 × input, 5-minute writes use cacheWrite5m (Anthropic pricing rules).
  */
@@ -110,11 +110,12 @@ const rows: [string, (t: Totals) => number, (n: number) => string][] = [
   ["Cache read", (t) => t.cacheRead, k],
   ["Output", (t) => t.output, k],
 ];
-const head = ["", ...results.map((r) => r.name), ...(results.length === 2 ? ["Δ"] : [])];
+// Every column after the first is followed by its delta vs the first one (the baseline).
+const head = ["", ...results.flatMap((r, i) => (i ? [r.name, `Δ ${r.name}`] : [r.name]))];
 console.log(`| ${head.join(" | ")} |\n|${head.map(() => "---").join("|")}|`);
 for (const [label, get, fmt] of rows) {
   const vals = results.map((r) => get(r.t));
-  console.log(`| ${[label, ...vals.map(fmt), ...(vals.length === 2 ? [pct(vals[0], vals[1])] : [])].join(" | ")} |`);
+  console.log(`| ${[label, ...vals.flatMap((v, i) => (i ? [fmt(v), pct(vals[0], v)] : [fmt(v)]))].join(" | ")} |`);
 }
 for (const r of results) {
   const tools = Object.entries(r.t.tools).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n} ${c}`).join(", ");
