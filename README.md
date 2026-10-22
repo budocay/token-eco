@@ -126,12 +126,15 @@ same prompts, warm cache, 9 hidden acceptance checks. Cost vs plain Claude Code:
 | 2 (v0.4) | −7% | – |
 | 3 (v0.5.0) | 0% | −5% |
 | 4 (v0.5.1) | +22% | +6% |
+| 5 (v0.5.3, **Opus 5.5**) | −1% (tokens −14%) | **−13%** (tokens −32%, 27 turns vs 37) |
 
 Every session passed 9/9. Tokens actually processed (all cache reads/writes + output): the strict agent used
 −10% (run 3) and −6% (run 4); the tools-only mode +4% and +29%.
 
 **Honest conclusion: no measurable dollar saving on real sessions with Sonnet 5.5; a modest token saving with the
-strict agent (2 runs, to confirm).** Cache reads are cheap ($0.10/MTok) so fewer tokens barely move the bill, but
+strict agent (2 runs, to confirm). With Opus 5.5 the strict agent saved 13% of the cost and 32% of the tokens
+(1 run, to confirm):** plain Opus reads whole files (18 Read, 17 Edit in that session) where plain Sonnet uses
+`grep`/`sed`, so the targeted tools have more to save. Cache reads are cheap ($0.10/MTok) so fewer tokens barely move the bill, but
 they matter for subscription limits and context length. Plain Sonnet already reads sparingly (`grep -A`, `sed -n` chained in one Bash call); the cost is driven by the number
 of turns, which the plugin does not reduce reliably, and session-to-session variance (±15%) is larger than any
 effect. Where it measurably helps: short targeted tasks (−10% in the A/B above), very long test/build outputs
