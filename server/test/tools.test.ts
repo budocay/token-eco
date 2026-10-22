@@ -130,8 +130,8 @@ test("search: files and count modes", async () => {
 
 test("search symbols: each hit labelled with its enclosing function/method", async () => {
   const r = await searchCompact({ pattern: "console\\.log|return filePath|self\\.p = p", symbols: true }, dir);
-  assert.match(r.text, /› launch L20-24\n\s+22: console\.log/);
-  assert.match(r.text, /› load L8-13\n\s+10: return filePath/);
+  assert.match(r.text, /› launch L20-24\n\s+22: +console\.log/);
+  assert.match(r.text, /› load L8-13\n\s+10: +return filePath/);
   assert.match(r.text, /› __init__ L7-8/);
   assert.equal(declarationName("export const double = (x: number) => x * 2;"), "double");
 });
@@ -155,6 +155,11 @@ test("search expand: whole enclosing body once, exact indentation, top-level hit
   assert.ok(r.nativeChars > 0);
 });
 
+test("search lines keep their indentation (copied into edits)", async () => {
+  const r = await searchCompact({ pattern: "self\\.p = p" }, dir);
+  assert.match(r.text, /  8: {9}self\.p = p/);
+});
+
 test("search queries: several searches in one call, isolated error, cap", async () => {
   const r = await searchMany([{ pattern: "console\\.log" }, { pattern: "(" }, { filter: "*.py" }], dir);
   assert.match(r.text, /=== console\\\.log ===\n1 match/);
@@ -166,7 +171,7 @@ test("search queries: several searches in one call, isolated error, cap", async 
 
 test("read target with pattern: matching lines of one file with context", async () => {
   const r = await readMany([{ file: "src/b.py", pattern: "self\\.p", context: 0 }, { file: "src/a.ts", name: "double" }], dir, 300);
-  assert.match(r.text, /=== src\/b\.py \/self\\\.p\/ ===\n2 match\(es\)[\s\S]*8: self\.p = p/);
+  assert.match(r.text, /=== src\/b\.py \/self\\\.p\/ ===\n2 match\(es\)[\s\S]*8: +self\.p = p/);
   assert.match(r.text, /=== src\/a\.ts double ===/);
 });
 

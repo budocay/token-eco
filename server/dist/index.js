@@ -22723,7 +22723,7 @@ async function searchCompact(args, cwd = process.cwd()) {
       for (let j = from; j <= a; j++) {
         if (seen.has(j)) continue;
         seen.add(j);
-        output.push(`  ${j + 1}${j === i ? ":" : "-"} ${truncate(lines[j].trim(), 160)}`);
+        output.push(`  ${j + 1}${j === i ? ":" : "-"} ${truncate(lines[j].trimEnd(), 160)}`);
       }
     }
     if (toShow.length < found.length) output.push(`  [+${found.length - toShow.length} more in this file]`);
