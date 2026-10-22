@@ -1,6 +1,7 @@
 # token-eco
 
-A personal Claude Code plugin that cuts token usage. It brings:
+A personal Claude Code plugin that tries to cut token usage (see **Benchmarks** for what it does and does not
+achieve). It brings:
 
 - an **MCP server** of token-saving file tools;
 - a short **session guidance** (SessionStart hook) so the default agent uses them and batches its calls;
@@ -14,7 +15,7 @@ A personal Claude Code plugin that cuts token usage. It brings:
 |---|---|---|
 | `read` | `name` → that symbol's code (doc, `template <…>`, overloads; definition preferred over prototype); `start`/`end` → range; `pattern` → matching lines of the file with context; nothing → whole file if short, else an outline; `targets` → up to 20 reads in one call (cap ≈ 10K tokens) | whole file / Read of the same range |
 | `search` | regex grouped by file, exact totals; `mode` `lines`/`files`/`count`; `symbols: true` → each hit labelled with its enclosing function/class (`› name L12-30`); `expand: true` → the whole enclosing function/class of each hit (≤ 150 lines each, ≈ 6K tokens per search): search + read in one call; `queries` → up to 10 searches in one call; no `pattern` + `glob` = file list | same lines in `grep -rn` format (+ Read of the expanded ranges) |
-| `edit` | N exact replacements (`old_string`/`new_string`/`replace_all`) in one call, all or nothing | snippets returned by N native `Edit` calls |
+| `edit` | N exact replacements (`old_string`/`new_string`/`replace_all`) in one call, all or nothing; when a text is not found, the error shows the closest passage (other indentation, matching line, shared words) to copy exactly | snippets returned by N native `Edit` calls |
 | `eco_report` | savings summary; `dashboard: true` starts the dashboard | – |
 
 **Why batching**: every tool call is a full turn that re-reads the whole context from the prompt cache (≈ 75K
@@ -111,10 +112,23 @@ same tasks in `claude -p` with and without the plugin and compares real cost, co
 
 **Real sessions** (`node bench/session-cost.ts <dir> <dir>… [--latest] [--cold]`: real cost from the Claude Code
 session logs, subagents included; `--cold` removes the warm-cache bias of the first turn). A 6-step session on
-click 8.5.0 (explore, fix a bug, add a type, rename across files, review with a subagent, changelog), Sonnet,
-v0.4 strict agent vs plain Claude Code: +17% then −7% over two runs, both 9/9 correct — no clear gain: plain
-Sonnet already reads sparingly (`grep -A`, `sed -n` chained in one Bash call) and the turn count, which drives the
-cost, stayed the same. Version 0.5 targets the turn count (batched `search`, `expand`, guidance, default mode).
+click 8.5.0 (explore, fix a bug, add a type, rename across files, review with a subagent, changelog), Sonnet 5.5,
+same prompts, warm cache, 9 hidden acceptance checks. Cost vs plain Claude Code:
+
+| Run | token-eco (tools, default) | token-eco strict agent |
+|---|---|---|
+| 1 (v0.4, cold-corrected) | +17% | – |
+| 2 (v0.4) | −7% | – |
+| 3 (v0.5.0) | 0% | −5% |
+| 4 (v0.5.1) | +22% | +6% |
+
+Every session passed 9/9. **Honest conclusion: no measurable saving on real sessions with Sonnet 5.5.** Plain
+Sonnet already reads sparingly (`grep -A`, `sed -n` chained in one Bash call); the cost is driven by the number
+of turns, which the plugin does not reduce reliably, and session-to-session variance (±15%) is larger than any
+effect. Where it measurably helps: short targeted tasks (−10% in the A/B above), very long test/build outputs
+(Bash compaction), full reads of very large files (redirected to an outline), and the usage dashboard.
+Lessons turned into fixes: search kept indentation (copied into edits), failed `edit` batches now show the
+closest passage so the retry takes one call.
 
 ## Development
 

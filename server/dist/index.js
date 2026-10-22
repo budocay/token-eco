@@ -22815,6 +22815,45 @@ function findAll(text2, pattern) {
   for (let i = text2.indexOf(pattern); i !== -1; i = text2.indexOf(pattern, i + pattern.length)) positions.push(i);
   return positions;
 }
+var HINT_MAX_LINES = 15;
+var words = (s) => new Set(s.toLowerCase().match(/[a-z0-9_]{2,}/g) ?? []);
+function closestPassage(text2, oldText) {
+  const lines = splitLines(text2);
+  const old = oldText.split("\n");
+  const show = (from, n, why) => {
+    const a = Math.max(0, from), b = Math.min(lines.length, a + Math.min(n, HINT_MAX_LINES));
+    return `
+  closest (${why}), copy it exactly:
+${lines.slice(a, b).map((l, i) => `  ${a + i + 1}|${l}`).join("\n")}`;
+  };
+  const oldTrim = old.map((l) => l.trim());
+  const first = oldTrim.findIndex((l) => l);
+  if (first >= 0) {
+    for (let i = 0; i + old.length <= lines.length; i++) {
+      if (oldTrim.every((l, k) => lines[i + k].trim() === l)) return show(i, old.length, "same text, different indentation");
+    }
+  }
+  const distinctive = oldTrim.map((l, k) => ({ l, k })).filter((x) => x.l.length >= 8).sort((a, b) => b.l.length - a.l.length);
+  for (const { l, k } of distinctive) {
+    const hits = lines.flatMap((fl, i) => fl.includes(l) ? [i] : []);
+    if (hits.length === 1) return show(hits[0] - k - 1, old.length + 2, `line ${hits[0] + 1} matches a line of old_string`);
+  }
+  if (first >= 0) {
+    const target = words(oldTrim[first]);
+    let best = -1, score = 0;
+    lines.forEach((fl, i) => {
+      if (!target.size) return;
+      const w = words(fl);
+      const s = [...target].filter((x) => w.has(x)).length / target.size;
+      if (s > score) {
+        score = s;
+        best = i;
+      }
+    });
+    if (best >= 0 && score >= 0.5) return show(best - 1, old.length + 2, `${Math.round(score * 100)}% of the words of its first line`);
+  }
+  return " \u2014 nothing similar: read the file first (read with pattern= or name=)";
+}
 async function batchEdit(args, cwd) {
   const contents = /* @__PURE__ */ new Map();
   const reports = /* @__PURE__ */ new Map();
@@ -22837,7 +22876,7 @@ async function batchEdit(args, cwd) {
     }
     const pos = findAll(text2, e.oldText);
     if (!pos.length) {
-      errors.push(`#${k + 1} ${e.file}: text not found`);
+      errors.push(`#${k + 1} ${e.file}: text not found${closestPassage(text2, e.oldText)}`);
       continue;
     }
     if (pos.length > 1 && !e.all) {
@@ -22860,7 +22899,8 @@ async function batchEdit(args, cwd) {
     reports.set(e.file, r);
   }
   if (errors.length) {
-    throw new Error(`nothing written (${errors.length} error(s)):
+    const ok = args.edits.length - errors.length;
+    throw new Error(`nothing written (${errors.length} error(s)${ok ? `; the ${ok} other edit(s) were valid: resend them with the fixed one(s)` : ""}):
 ${errors.join("\n")}`);
   }
   await Promise.all([...contents].map(([filePath, text2]) => writeFile(filePath, text2)));
@@ -23167,7 +23207,7 @@ function summaryText() {
 import { execFile } from "node:child_process";
 import { extname as extname2 } from "node:path";
 import { fileURLToPath } from "node:url";
-var server = new McpServer({ name: "token-eco", version: "0.5.1" });
+var server = new McpServer({ name: "token-eco", version: "0.5.2" });
 var ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 function adapter(name, tool) {
   return async (args) => {

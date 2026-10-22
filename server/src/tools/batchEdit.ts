@@ -30,6 +30,48 @@ function findAll(text: string, pattern: string): number[] {
   return positions;
 }
 
+const HINT_MAX_LINES = 15;
+const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9_]{2,}/g) ?? []);
+
+/**
+ * When old_string is not found: the closest passage of the file, exact text with line numbers, so the
+ * retry succeeds in one call (a failed batch otherwise costs a full extra turn, often more).
+ * 1. same lines with different indentation; 2. a distinctive line of old_string found verbatim;
+ * 3. the line sharing the most words with old_string (≥ 50 %). Otherwise: advise to read the file.
+ */
+export function closestPassage(text: string, oldText: string): string {
+  const lines = splitLines(text);
+  const old = oldText.split("\n");
+  const show = (from: number, n: number, why: string) => {
+    const a = Math.max(0, from), b = Math.min(lines.length, a + Math.min(n, HINT_MAX_LINES));
+    return `\n  closest (${why}), copy it exactly:\n${lines.slice(a, b).map((l, i) => `  ${a + i + 1}|${l}`).join("\n")}`;
+  };
+  const oldTrim = old.map((l) => l.trim());
+  const first = oldTrim.findIndex((l) => l);
+  if (first >= 0) {
+    for (let i = 0; i + old.length <= lines.length; i++) {
+      if (oldTrim.every((l, k) => lines[i + k].trim() === l)) return show(i, old.length, "same text, different indentation");
+    }
+  }
+  const distinctive = oldTrim.map((l, k) => ({ l, k })).filter((x) => x.l.length >= 8).sort((a, b) => b.l.length - a.l.length);
+  for (const { l, k } of distinctive) {
+    const hits = lines.flatMap((fl, i) => (fl.includes(l) ? [i] : []));
+    if (hits.length === 1) return show(hits[0] - k - 1, old.length + 2, `line ${hits[0] + 1} matches a line of old_string`);
+  }
+  if (first >= 0) {
+    const target = words(oldTrim[first]);
+    let best = -1, score = 0;
+    lines.forEach((fl, i) => {
+      if (!target.size) return;
+      const w = words(fl);
+      const s = [...target].filter((x) => w.has(x)).length / target.size;
+      if (s > score) { score = s; best = i; }
+    });
+    if (best >= 0 && score >= 0.5) return show(best - 1, old.length + 2, `${Math.round(score * 100)}% of the words of its first line`);
+  }
+  return " — nothing similar: read the file first (read with pattern= or name=)";
+}
+
 export async function batchEdit(args: BatchEditArgs, cwd?: string): Promise<ToolResult> {
   const contents = new Map<string, string>();
   const reports = new Map<string, string[]>();
@@ -45,7 +87,7 @@ export async function batchEdit(args: BatchEditArgs, cwd?: string): Promise<Tool
     const text = contents.get(filePath)!;
     if (!e.oldText) { errors.push(`#${k + 1} ${e.file}: empty old_string`); continue; }
     const pos = findAll(text, e.oldText);
-    if (!pos.length) { errors.push(`#${k + 1} ${e.file}: text not found`); continue; }
+    if (!pos.length) { errors.push(`#${k + 1} ${e.file}: text not found${closestPassage(text, e.oldText)}`); continue; }
     if (pos.length > 1 && !e.all) {
       errors.push(`#${k + 1} ${e.file}: ${pos.length} occurrences (l.${pos.slice(0, 5).map((p) => lineOf(text, p)).join(", ")}) — add context or replace_all=true`);
       continue;
@@ -69,7 +111,8 @@ export async function batchEdit(args: BatchEditArgs, cwd?: string): Promise<Tool
   }
 
   if (errors.length) {
-    throw new Error(`nothing written (${errors.length} error(s)):\n${errors.join("\n")}`);
+    const ok = args.edits.length - errors.length;
+    throw new Error(`nothing written (${errors.length} error(s)${ok ? `; the ${ok} other edit(s) were valid: resend them with the fixed one(s)` : ""}):\n${errors.join("\n")}`);
   }
   await Promise.all([...contents].map(([filePath, text]) => writeFile(filePath, text)));
 

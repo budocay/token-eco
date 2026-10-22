@@ -256,3 +256,20 @@ test("SessionStart hook: injects the batching guidance as additionalContext", as
   assert.ok(o.additionalContext.length < 1200, "guidance must stay short");
   await rm(home, { recursive: true, force: true });
 });
+
+test("edit not found: closest passage (indentation, distinctive line, shared words, nothing)", async () => {
+  const { closestPassage } = await import("../src/tools/batchEdit.ts");
+  const text = "def f(x):\n    if x:\n        return compute_total(x, 3)\n    return None\n\n# other\n";
+  assert.match(closestPassage(text, "if x:\n    return compute_total(x, 3)"), /different indentation[\s\S]*  2\|    if x:\n  3\|        return compute_total/);
+  assert.match(closestPassage(text, "        return compute_total(x, 3)\n    return Nothing"), /line 3 matches[\s\S]*  2\|    if x:\n  3\|        return compute_total/);
+  assert.match(closestPassage(text, "return compute_total(y, 4)"), /of the words[\s\S]*  3\|        return compute_total\(x, 3\)/);
+  assert.match(closestPassage(text, "zzz qqq"), /nothing similar: read the file first/);
+  const dir = await mkdtemp(join(tmpdir(), "token-eco-edit-"));
+  await writeFile(join(dir, "a.py"), text);
+  await assert.rejects(batchEdit({ edits: [
+    { file: "a.py", oldText: "# other", newText: "# ok" },
+    { file: "a.py", oldText: "if x:\n    return compute_total(x, 3)", newText: "" },
+  ] }, dir), /the 1 other edit\(s\) were valid[\s\S]*different indentation/);
+  assert.equal(await readFile(join(dir, "a.py"), "utf8"), text); // all or nothing
+  await rm(dir, { recursive: true, force: true });
+});
