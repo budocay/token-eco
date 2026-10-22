@@ -229,3 +229,17 @@ test("web: API, page and foreign Host rejected", async () => {
     assert.equal(status, 403);
   } finally { srv2.close(); }
 });
+
+test("SessionStart hook: injects the batching guidance as additionalContext", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const home = await mkdtemp(join(tmpdir(), "token-eco-home-"));
+  const out = execFileSync(process.execPath, [join(import.meta.dirname, "../src/hook.ts")], {
+    input: JSON.stringify({ hook_event_name: "SessionStart", source: "startup", session_id: "s" }),
+    env: { ...process.env, TOKEN_ECO_HOME: home }, encoding: "utf8",
+  });
+  const o = JSON.parse(out).hookSpecificOutput;
+  assert.equal(o.hookEventName, "SessionStart");
+  assert.match(o.additionalContext, /queries[\s\S]*expand: true[\s\S]*targets/);
+  assert.ok(o.additionalContext.length < 1200, "guidance must stay short");
+  await rm(home, { recursive: true, force: true });
+});

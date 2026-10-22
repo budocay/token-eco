@@ -21551,7 +21551,7 @@ var StdioServerTransport = class {
 };
 
 // src/tools/read.ts
-import { readFile as readFile4 } from "node:fs/promises";
+import { readFile as readFile5 } from "node:fs/promises";
 
 // src/types.ts
 import { resolve } from "node:path";
@@ -22556,45 +22556,8 @@ async function readSymbol(args, cwd) {
   };
 }
 
-// src/tools/read.ts
-var MULTI_CAP = 4e4;
-async function readMany(targets, cwd, fullThreshold, cap = MULTI_CAP) {
-  const chunks = [];
-  let native = 0, size = 0, i = 0;
-  for (; i < targets.length; i++) {
-    const c = targets[i];
-    const what = c.name ? ` ${c.name}` : c.start || c.end ? ` ${c.start ?? 1}-${c.end ?? ""}` : "";
-    let text2;
-    try {
-      const r = await read(c, cwd, fullThreshold);
-      text2 = r.text;
-      native += r.nativeChars;
-    } catch (e) {
-      text2 = `error: ${e.message}`;
-    }
-    const block = `=== ${c.file}${what} ===
-${text2}`;
-    if (size + block.length > cap && chunks.length) break;
-    chunks.push(block);
-    size += block.length;
-  }
-  if (i < targets.length) {
-    chunks.push(`[size cap reached; not read: ${targets.slice(i).map((c) => c.file + (c.name ? ` ${c.name}` : "")).join(", ")}]`);
-  }
-  return { text: chunks.join("\n\n"), nativeChars: native, details: { targets: targets.length, readCount: i } };
-}
-async function read(args, cwd, fullThreshold) {
-  if (args.name) return readSymbol({ file: args.file, name: args.name }, cwd);
-  if (args.start || args.end) return readRange(args, cwd);
-  const total = splitLines(await readFile4(absolutePath(args.file, cwd), "utf8")).length;
-  if (total <= fullThreshold) return readRange({ file: args.file, start: 1, end: total }, cwd);
-  const r = await outline({ file: args.file }, cwd);
-  return { ...r, text: `${r.text}
-[${total} lines: outline only \u2014 read again with name=<symbol> or start/end]` };
-}
-
 // src/tools/searchCompact.ts
-import { readdir, readFile as readFile5, stat } from "node:fs/promises";
+import { readdir, readFile as readFile4, stat } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 var IGNORED_DIRS = /* @__PURE__ */ new Set([
   ".git",
@@ -22613,6 +22576,8 @@ var IGNORED_DIRS = /* @__PURE__ */ new Set([
   "target"
 ]);
 var MAX_SIZE = 1e6;
+var EXPAND_MAX_LINES = 150;
+var EXPAND_CAP = 24e3;
 var DECL_KEYWORD = /\b(?:function|class|def|fn|func|struct|interface|type|enum|trait|impl|module|object|record|protocol|extension|macro|sub|proc|method)\s+([A-Za-z_$][\w$.:]*)/;
 function declarationName(line) {
   const t = line.trim();
@@ -22628,14 +22593,16 @@ function enclosingSymbol(file, lines) {
     let best;
     for (const d of decls) {
       if (d > i) break;
-      let end = ends.get(d);
-      if (end === void 0) {
-        end = blockEnd(lines, d, p, mask);
-        ends.set(d, end);
+      let end2 = ends.get(d);
+      if (end2 === void 0) {
+        end2 = blockEnd(lines, d, p, mask);
+        ends.set(d, end2);
       }
-      if (end >= i) best = d;
+      if (end2 >= i) best = d;
     }
-    return best === void 0 ? void 0 : `${declarationName(lines[best])} L${best + 1}-${ends.get(best) + 1}`;
+    if (best === void 0) return void 0;
+    const end = ends.get(best);
+    return { start: best, end, label: `${declarationName(lines[best])} L${best + 1}-${end + 1}` };
   };
 }
 function globToRegex(glob) {
@@ -22680,7 +22647,7 @@ async function searchCompact(args, cwd = process.cwd()) {
   const files = rootInfo.isFile() ? [root] : walkDir(root);
   const mode = args.mode ?? "lines";
   const blocks = [];
-  let fileCount = 0, totalCount = 0, shownCount = 0, nativeChars = 0;
+  let fileCount = 0, totalCount = 0, shownCount = 0, nativeChars = 0, expandBudget = EXPAND_CAP;
   for await (const f of files) {
     const rel = relative(cwd, f).split(sep).join("/") || f;
     if (filter && !filter.test(args.filter.includes("/") ? rel : rel.split("/").pop())) continue;
@@ -22695,7 +22662,7 @@ async function searchCompact(args, cwd = process.cwd()) {
       continue;
     }
     if ((await stat(f)).size > MAX_SIZE) continue;
-    const raw = await readFile5(f);
+    const raw = await readFile4(f);
     if (raw.subarray(0, 8e3).includes(0)) continue;
     const lines = splitLines(raw.toString("utf8"));
     const found = [];
@@ -22723,13 +22690,31 @@ async function searchCompact(args, cwd = process.cwd()) {
     }
     const seen = /* @__PURE__ */ new Set();
     const output = [rel];
-    const enclosing = args.symbols ? enclosingSymbol(f, lines) : null;
+    const enclosing = args.symbols || args.expand ? enclosingSymbol(f, lines) : null;
     let lastSymbol;
+    const expanded = /* @__PURE__ */ new Set();
     for (const i of toShow) {
+      if (args.expand && seen.has(i)) continue;
+      const span = enclosing?.(i);
+      if (args.expand && span) {
+        if (expanded.has(span.label)) continue;
+        const n = span.end - span.start + 1;
+        const body = lines.slice(span.start, span.end + 1).map((l, k) => `${span.start + k + 1}|${truncate(l, 500)}`);
+        const size = body.reduce((s, l) => s + l.length + 1, 0);
+        if (n <= EXPAND_MAX_LINES && expandBudget >= size) {
+          expanded.add(span.label);
+          expandBudget -= size;
+          output.push(`  \u203A ${span.label}`, ...body);
+          nativeChars += lines.slice(span.start, span.end + 1).reduce((s, l, k) => s + l.length + String(span.start + k + 1).length + 2, 0);
+          for (let j = span.start; j <= span.end; j++) seen.add(j);
+          lastSymbol = span.label;
+          continue;
+        }
+      }
       if (enclosing) {
-        const s = enclosing(i);
+        const s = span?.label;
         if (s !== lastSymbol) {
-          output.push(`  \u203A ${s ?? "(top level)"}`);
+          output.push(`  \u203A ${s ?? "(top level)"}${args.expand && span ? " (too long or over budget: read name=\u2026)" : ""}`);
           lastSymbol = s;
         }
       }
@@ -22756,6 +22741,69 @@ ${blocks.join("\n")}${footer}`,
     nativeChars,
     details: { pattern: args.pattern, mode, files: fileCount, results: totalCount }
   };
+}
+var MANY_CAP = 4e4;
+async function searchMany(queries, cwd = process.cwd(), cap = MANY_CAP) {
+  const chunks = [];
+  let native = 0, size = 0, i = 0;
+  const label = (q) => `${q.pattern ?? `files ${q.filter ?? ""}`}${q.filePath ? ` in ${q.filePath}` : ""}`;
+  for (; i < queries.length; i++) {
+    let text2;
+    try {
+      const r = await searchCompact(queries[i], cwd);
+      text2 = r.text;
+      native += r.nativeChars;
+    } catch (e) {
+      text2 = `error: ${e.message}`;
+    }
+    const block = `=== ${label(queries[i])} ===
+${text2}`;
+    if (size + block.length > cap && chunks.length) break;
+    chunks.push(block);
+    size += block.length;
+  }
+  if (i < queries.length) chunks.push(`[size cap reached; not run: ${queries.slice(i).map(label).join(", ")}]`);
+  return { text: chunks.join("\n\n"), nativeChars: native, details: { queries: queries.length, runCount: i } };
+}
+
+// src/tools/read.ts
+var MULTI_CAP = 4e4;
+async function readMany(targets, cwd, fullThreshold, cap = MULTI_CAP) {
+  const chunks = [];
+  let native = 0, size = 0, i = 0;
+  for (; i < targets.length; i++) {
+    const c = targets[i];
+    const what = c.name ? ` ${c.name}` : c.pattern ? ` /${c.pattern}/` : c.start || c.end ? ` ${c.start ?? 1}-${c.end ?? ""}` : "";
+    let text2;
+    try {
+      const r = await read(c, cwd, fullThreshold);
+      text2 = r.text;
+      native += r.nativeChars;
+    } catch (e) {
+      text2 = `error: ${e.message}`;
+    }
+    const block = `=== ${c.file}${what} ===
+${text2}`;
+    if (size + block.length > cap && chunks.length) break;
+    chunks.push(block);
+    size += block.length;
+  }
+  if (i < targets.length) {
+    chunks.push(`[size cap reached; not read: ${targets.slice(i).map((c) => c.file + (c.name ? ` ${c.name}` : "")).join(", ")}]`);
+  }
+  return { text: chunks.join("\n\n"), nativeChars: native, details: { targets: targets.length, readCount: i } };
+}
+async function read(args, cwd, fullThreshold) {
+  if (args.name) return readSymbol({ file: args.file, name: args.name }, cwd);
+  if (args.pattern) {
+    return searchCompact({ pattern: args.pattern, filePath: args.file, context: args.context ?? 2, maxResults: 30 }, cwd);
+  }
+  if (args.start || args.end) return readRange(args, cwd);
+  const total = splitLines(await readFile5(absolutePath(args.file, cwd), "utf8")).length;
+  if (total <= fullThreshold) return readRange({ file: args.file, start: 1, end: total }, cwd);
+  const r = await outline({ file: args.file }, cwd);
+  return { ...r, text: `${r.text}
+[${total} lines: outline only \u2014 read again with name=<symbol> or start/end]` };
 }
 
 // src/tools/batchEdit.ts
@@ -23147,23 +23195,27 @@ function adapter(name, tool) {
 server.registerTool(
   "read",
   {
-    description: "Read a file cheaply. name \u2192 that symbol's code (function/class/method/type, with doc). start/end \u2192 those lines. Neither \u2192 whole file if short, else an outline (signatures + line numbers) to pick from. targets \u2192 several of these reads in ONE call (batch everything you already know you need).",
+    description: "Read a file cheaply. name \u2192 that symbol's code (function/class/method/type, with doc). start/end \u2192 those lines. Neither \u2192 whole file if short, else an outline (signatures + line numbers) to pick from. pattern \u2192 matching lines of that file with context. targets \u2192 several of these reads in ONE call (batch everything you already know you need).",
     inputSchema: {
       file: external_exports.string().optional().describe("Path relative to the project"),
       name: external_exports.string().optional(),
       start: external_exports.number().int().min(1).optional(),
       end: external_exports.number().int().min(1).optional(),
+      pattern: external_exports.string().optional().describe("Regex: matching lines of file, \xB1context lines (default 2)"),
+      context: external_exports.number().int().min(0).max(3).optional(),
       targets: external_exports.array(external_exports.object({
         file: external_exports.string(),
         name: external_exports.string().optional(),
         start: external_exports.number().int().min(1).optional(),
-        end: external_exports.number().int().min(1).optional()
-      })).max(20).optional().describe("Batch: [{file, name?|start?/end?}, \u2026]")
+        end: external_exports.number().int().min(1).optional(),
+        pattern: external_exports.string().optional(),
+        context: external_exports.number().int().min(0).max(3).optional()
+      })).max(20).optional().describe("Batch: [{file, name?|start?/end?|pattern?}, \u2026]")
     }
   },
   adapter("read", async (a) => {
     const threshold = readConfig().hook.lineThreshold;
-    const targets = [...a.file ? [a] : [], ...a.targets ?? []].map((t) => ({ file: t.file, name: t.name, start: t.start, end: t.end }));
+    const targets = [...a.file ? [a] : [], ...a.targets ?? []].map((t) => ({ file: t.file, name: t.name, start: t.start, end: t.end, pattern: t.pattern, context: t.context }));
     if (!targets.length) throw new Error("give file or targets");
     return targets.length === 1 ? read(targets[0], ROOT, threshold) : readMany(targets, ROOT, threshold);
   })
@@ -23172,8 +23224,16 @@ var MODES = { lines: "lines", files: "files", count: "count" };
 server.registerTool(
   "search",
   {
-    description: "Regex search grouped by file, exact totals, capped output; no pattern + glob = list files. Skips .git, node_modules, dist\u2026",
+    description: "Regex search grouped by file, exact totals, capped output; no pattern + glob = list files. Skips .git, node_modules, dist\u2026 expand \u2192 the whole function/class around each hit (search + read in one call). queries \u2192 several searches in ONE call (top-level options are defaults for each).",
     inputSchema: {
+      queries: external_exports.array(external_exports.object({
+        pattern: external_exports.string().optional(),
+        path: external_exports.string().optional(),
+        glob: external_exports.string().optional(),
+        mode: external_exports.enum(["lines", "files", "count"]).optional(),
+        expand: external_exports.boolean().optional()
+      })).max(10).optional().describe("Batch: [{pattern?, path?, glob?, mode?, expand?}, \u2026]"),
+      expand: external_exports.boolean().optional().describe("Return the whole enclosing function/class of each hit (\u2264150 lines each)"),
       pattern: external_exports.string().optional().describe("JavaScript regex"),
       path: external_exports.string().optional().describe("Directory or file (default .)"),
       glob: external_exports.string().optional().describe("e.g. *.ts or src/**/*.py"),
@@ -23184,16 +23244,32 @@ server.registerTool(
       symbols: external_exports.boolean().optional().describe("Label hits with their enclosing function/class + line span, so you can read name=\u2026 directly")
     }
   },
-  adapter("search", (a) => searchCompact({
-    pattern: a.pattern,
-    filePath: a.path,
-    filter: a.glob,
-    ignoreCase: a.ignore_case,
-    symbols: a.symbols,
-    mode: a.mode ? MODES[a.mode] : void 0,
-    maxResults: a.max_results,
-    context: a.context
-  }, ROOT))
+  adapter("search", (a) => {
+    const base = {
+      pattern: a.pattern,
+      filePath: a.path,
+      filter: a.glob,
+      ignoreCase: a.ignore_case,
+      symbols: a.symbols,
+      mode: a.mode ? MODES[a.mode] : void 0,
+      maxResults: a.max_results,
+      context: a.context,
+      expand: a.expand
+    };
+    if (!a.queries?.length) return searchCompact(base, ROOT);
+    const queries = [
+      ...a.pattern ? [base] : [],
+      ...a.queries.map((q) => ({
+        ...base,
+        pattern: q.pattern,
+        filePath: q.path ?? base.filePath,
+        filter: q.glob ?? base.filter,
+        mode: q.mode ? MODES[q.mode] : base.mode,
+        expand: q.expand ?? base.expand
+      }))
+    ];
+    return queries.length === 1 ? searchCompact(queries[0], ROOT) : searchMany(queries, ROOT);
+  })
 );
 server.registerTool(
   "edit",

@@ -1,6 +1,14 @@
 {
-  "description": "token-eco: compact Bash output (transparent rewrite) and redirect expensive Read/Grep calls, for every agent",
+  "description": "token-eco: session guidance (batch calls), compact Bash output (transparent rewrite) and redirect expensive Read/Grep calls, for every agent",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/dist/hook.js\"", "timeout": 10 }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Read|Grep|Bash",

@@ -18,8 +18,10 @@ import { family } from "./compact.ts";
 import { outline } from "./tools/outline.ts";
 import { nativeReadChars, splitLines } from "./types.ts";
 import { estimateTokens } from "./tokens.ts";
+import { sessionStartOutput } from "./guidance.ts";
 
 export interface HookInput {
+  hook_event_name?: string;
   session_id?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
@@ -144,6 +146,10 @@ async function main(): Promise<void> {
   for await (const chunk of process.stdin) raw += chunk;
   const e = JSON.parse(raw) as HookInput;
   const config = readConfig();
+  if (e.hook_event_name === "SessionStart") {
+    if (config.hook.mode !== "off") process.stdout.write(sessionStartOutput());
+    return;
+  }
   const runJs = join(dirname(process.argv[1]), "run.js");
   const stateFile = join(dataDir(), "hook-state.json");
   let state: State = {};

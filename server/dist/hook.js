@@ -942,6 +942,18 @@ function estimateTokens(input) {
   return Math.ceil(Math.max(0, chars) / CHARS_PER_TOKEN);
 }
 
+// src/guidance.ts
+var GUIDANCE = [
+  "token-eco: every tool call is a full turn that re-reads the whole context, so the NUMBER of calls is what costs. Plan, then batch:",
+  "- one `search` with all your `queries`; `expand: true` returns the whole function/class around each hit (search + read in one call);",
+  "- one `read` with all `targets` (`name` = one symbol, `start`/`end`, `pattern` = matching lines; no option = whole file if short, else outline);",
+  "- one `edit` with every change of a step; one Bash call chaining related commands (e.g. tests, then `git diff --stat`).",
+  "Prefer these tools to Read/Grep/Glob/Edit and to cat/grep/sed in Bash. Never re-read what you just read or wrote."
+].join("\n");
+function sessionStartOutput() {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: GUIDANCE } });
+}
+
 // src/hook.ts
 var DELAI_REPLI_MS = 10 * 6e4;
 var NON_TEXT = /* @__PURE__ */ new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".pdf", ".ipynb"]);
@@ -1048,6 +1060,10 @@ async function main() {
   for await (const chunk of process.stdin) raw += chunk;
   const e = JSON.parse(raw);
   const config = readConfig();
+  if (e.hook_event_name === "SessionStart") {
+    if (config.hook.mode !== "off") process.stdout.write(sessionStartOutput());
+    return;
+  }
   const runJs = join3(dirname(process.argv[1]), "run.js");
   const stateFile = join3(dataDir(), "hook-state.json");
   let state = {};
