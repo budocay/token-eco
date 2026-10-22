@@ -1,7 +1,9 @@
 /**
  * Real cost of Claude Code sessions, from the session logs (~/.claude/projects/<encoded cwd>/*.jsonl,
  * subagents in <session>/subagents/*.jsonl). Usage:
- *   node bench/session-cost.ts <project dir | session.jsonl> [more…] [--model claude-sonnet-5.5] [--latest]
+ *   node bench/session-cost.ts <project dir | session.jsonl> [more…] [--model claude-sonnet-5.5] [--latest] [--cold]
+ * --latest: only the most recent session of each project (skips warmup sessions);
+ * --cold: count the first turn's cache read as a cache write (same cold start for every session).
  * With two arguments, the second is compared with the first (delta %).
  * Assumptions: an assistant message logged on several lines is counted once (by message.id);
  * 1-hour cache writes cost 2 × input, 5-minute writes use cacheWrite5m (Anthropic pricing rules).
@@ -20,7 +22,9 @@ interface Totals {
 const args = process.argv.slice(2);
 const flag = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args.splice(i, 2)[1] : undefined; };
 const forcedModel = flag("--model");
-const latest = args.includes("--latest") ? (args.splice(args.indexOf("--latest"), 1), true) : false;
+const bool = (name: string) => (args.includes(name) ? (args.splice(args.indexOf(name), 1), true) : false);
+const latest = bool("--latest");
+const cold = bool("--cold");
 if (!args.length) { console.error("usage: node bench/session-cost.ts <project dir | session.jsonl> [more…] [--model m] [--latest]"); process.exit(1); }
 
 function priceFor(model: string): ModelPrice | undefined {
@@ -66,9 +70,12 @@ function add(t: Totals, file: string, isSub: boolean): void {
     const u = m.usage;
     if (!u || !m.id || seenMsg.has(m.id) || m.model === "<synthetic>") continue;
     seenMsg.add(m.id);
-    const w1h = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+    let w1h = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
     const w5m = u.cache_creation ? (u.cache_creation.ephemeral_5m_input_tokens ?? 0) : (u.cache_creation_input_tokens ?? 0);
-    const inp = u.input_tokens ?? 0, read = u.cache_read_input_tokens ?? 0, out = u.output_tokens ?? 0;
+    const inp = u.input_tokens ?? 0, out = u.output_tokens ?? 0;
+    let read = u.cache_read_input_tokens ?? 0;
+    // --cold: the first turn of a session pays its whole prefix as a 1h cache write (removes warm-cache bias).
+    if (cold && !isSub && seenMsg.size === 1) { w1h += read; read = 0; }
     t.input += inp; t.write5m += w5m; t.write1h += w1h; t.cacheRead += read; t.output += out;
     if (isSub) t.subagentTurns++; else { t.turns++; t.peakContext = Math.max(t.peakContext, inp + w5m + w1h + read); }
     t.models.add(m.model);
