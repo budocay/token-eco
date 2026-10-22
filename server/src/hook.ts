@@ -59,6 +59,42 @@ export function decompose(command: string): { prior: string; c: string; trailer:
   return { prior, c, trailer };
 }
 
+const SHELL_KEYWORDS = new Set(["for", "while", "until", "if", "case", "do", "then", "else", "elif", "fi", "done", "esac", "function", "select"]);
+
+/**
+ * Splits `a && b; c || d` on its top-level operators (quotes respected). Returns null as soon as the
+ * structure is not a plain list of simple commands ($(…), backticks, heredoc, ( ) { }, background &,
+ * newline, shell keywords): the command is then left untouched.
+ */
+export function splitCompound(command: string): { parts: string[]; ops: string[] } | null {
+  const parts: string[] = [], ops: string[] = [];
+  let cur = "", q: "'" | '"' | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i], next = command[i + 1];
+    if (q) {
+      if (ch === "`" || (q === '"' && ch === "$" && next === "(")) return null;
+      if (ch === "\\" && q === '"') { cur += ch + (next ?? ""); i++; continue; }
+      if (ch === q) q = null;
+      cur += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') { q = ch; cur += ch; continue; }
+    if (ch === "\\") { cur += ch + (next ?? ""); i++; continue; }
+    if (ch === "{" && next === "}") { cur += "{}"; i++; continue; } // find -exec … {} literal
+    if ("`(){}\n".includes(ch) || (ch === "$" && next === "(") || (ch === "<" && next === "<")) return null;
+    if ((ch === "&" && next === "&") || (ch === "|" && next === "|")) { parts.push(cur); ops.push(ch + next); cur = ""; i++; continue; }
+    if (ch === ";") { parts.push(cur); ops.push(";"); cur = ""; continue; }
+    if (ch === "&" && command[i - 1] !== ">" && next !== ">") return null; // background job
+    cur += ch;
+  }
+  if (q) return null;
+  parts.push(cur);
+  const trimmed = parts.map((p) => p.trim());
+  if (trimmed.some((p, i) => !p && i < trimmed.length - 1) || trimmed.some((p) => SHELL_KEYWORDS.has(p.split(/\s+/)[0]))) return null;
+  if (!trimmed[trimmed.length - 1]) { trimmed.pop(); ops.pop(); } // trailing `;`
+  return { parts: trimmed, ops };
+}
+
 export function countLines(filePath: string): number {
   const size = statSync(filePath).size;
   if (size > 50_000_000) return Infinity;
@@ -105,12 +141,25 @@ export function decide(e: HookInput, config: Config, state: State, now = Date.no
 
   if (e.tool_name === "Bash") {
     const complete = String(ti.command ?? "").trim();
-    const { prior, c, trailer } = decompose(complete);
-    if (!c || COMPOUND.test(c) || WATCH_MODE.test(c) || ti.run_in_background || family(c) === "other") return { action: "pass" };
-    if (rules.deny.some((r) => ruleMatches(r, c) || ruleMatches(r, complete))) return { action: "pass" };
-    // cd / tail / head are harmless: permission is decided on the core command.
-    const autoAllow = e.permission_mode === "bypassPermissions" || READ_ONLY.test(c) || rules.allow.some((r) => ruleMatches(r, c));
-    return { action: "rewrite", command: `${prior}node ${quote(runJs)} ${quote(c)}${trailer}`, autoAllow };
+    const split = ti.run_in_background ? null : splitCompound(complete);
+    if (!split) return { action: "pass" };
+    if (rules.deny.some((r) => ruleMatches(r, complete))) return { action: "pass" };
+    // Each part: noisy simple command → run.js (exit code kept, so && / || still behave); others verbatim.
+    // cd / tail / head are harmless: permission is decided on the core command of each part.
+    let changed = false, allAllowed = true;
+    const out: string[] = [];
+    for (const part of split.parts) {
+      if (/^cd(\s|$)/.test(part) && !COMPOUND.test(part)) { out.push(part); continue; }
+      const { prior, c, trailer } = decompose(part);
+      if (rules.deny.some((r) => ruleMatches(r, c) || ruleMatches(r, part))) return { action: "pass" };
+      if (!(READ_ONLY.test(c) || rules.allow.some((r) => ruleMatches(r, c) || ruleMatches(r, part)))) allAllowed = false;
+      if (!c || COMPOUND.test(c) || WATCH_MODE.test(c) || family(c) === "other") { out.push(part); continue; }
+      changed = true;
+      out.push(`${prior}node ${quote(runJs)} ${quote(c)}${trailer}`);
+    }
+    if (!changed) return { action: "pass" };
+    const command = out.map((p, i) => (i ? ` ${split.ops[i - 1]} ` : "") + p).join("");
+    return { action: "rewrite", command, autoAllow: e.permission_mode === "bypassPermissions" || allAllowed };
   }
   if (e.tool_name === "Read") {
     const f = String(ti.file_path ?? "");

@@ -15,8 +15,17 @@ const INSTALL = /^(npm|pnpm|yarn|bun)\s+(install|i|add|ci|update)\b|^pip3?\s+ins
 const BUILD = /^(npm|pnpm|yarn|bun)\s+run\s+(build|lint|typecheck|check)\b|^(npx\s+)?(tsc|eslint|biome|prettier\s+--check|ruff|mypy|pyright|next\s+build|vite\s+build|webpack)\b|^cargo\s+(build|check|clippy)\b|^go\s+(build|vet)\b|^make\b|^gradlew?\b|^mvn\b|^dotnet\s+build\b|^swift\s+build\b/;
 const GIT = /^git\s+(status|log|diff|show|branch|fetch|pull|push|commit|add|checkout|switch|merge|rebase|stash)\b/;
 
+/** `.venv/bin/python -m pytest`, `uv run pytest`, `node_modules/.bin/jest` → `pytest`, `jest` (detection only). */
+export function normalizeCommand(command: string): string {
+  return command.trim()
+    .replace(/^(?:\S*\/)?(?:\.?venv|env)\/bin\//, "")
+    .replace(/^(?:\S*\/)?node_modules\/\.bin\//, "")
+    .replace(/^(?:uv|poetry|pipenv|hatch|pdm|rye)\s+run\s+/, "")
+    .replace(/^python[\d.]*\s+-m\s+/, "");
+}
+
 export function family(command: string): Family {
-  const c = command.trim();
+  const c = normalizeCommand(command);
   if (TESTS.test(c)) return "test";
   if (GIT.test(c)) return "git";
   if (INSTALL.test(c)) return "install";

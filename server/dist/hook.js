@@ -159,8 +159,11 @@ var TESTS = /^(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|^(npx\s+)?(jest|vitest|mocha
 var INSTALL = /^(npm|pnpm|yarn|bun)\s+(install|i|add|ci|update)\b|^pip3?\s+install\b|^(uv\s+)?pip\s+install\b|^poetry\s+(install|add)\b|^cargo\s+(fetch|update)\b|^go\s+(mod|get)\b|^bundle(\s+install)?$|^composer\s+(install|update|require)\b|^brew\s+(install|upgrade)\b/;
 var BUILD = /^(npm|pnpm|yarn|bun)\s+run\s+(build|lint|typecheck|check)\b|^(npx\s+)?(tsc|eslint|biome|prettier\s+--check|ruff|mypy|pyright|next\s+build|vite\s+build|webpack)\b|^cargo\s+(build|check|clippy)\b|^go\s+(build|vet)\b|^make\b|^gradlew?\b|^mvn\b|^dotnet\s+build\b|^swift\s+build\b/;
 var GIT = /^git\s+(status|log|diff|show|branch|fetch|pull|push|commit|add|checkout|switch|merge|rebase|stash)\b/;
+function normalizeCommand(command) {
+  return command.trim().replace(/^(?:\S*\/)?(?:\.?venv|env)\/bin\//, "").replace(/^(?:\S*\/)?node_modules\/\.bin\//, "").replace(/^(?:uv|poetry|pipenv|hatch|pdm|rye)\s+run\s+/, "").replace(/^python[\d.]*\s+-m\s+/, "");
+}
 function family(command) {
-  const c = command.trim();
+  const c = normalizeCommand(command);
   if (TESTS.test(c)) return "test";
   if (GIT.test(c)) return "git";
   if (INSTALL.test(c)) return "install";
@@ -978,6 +981,65 @@ function decompose(command) {
   c = c.replace(/\s+2>&1\s*$/, "").trim();
   return { prior, c, trailer };
 }
+var SHELL_KEYWORDS = /* @__PURE__ */ new Set(["for", "while", "until", "if", "case", "do", "then", "else", "elif", "fi", "done", "esac", "function", "select"]);
+function splitCompound(command) {
+  const parts = [], ops = [];
+  let cur = "", q = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i], next = command[i + 1];
+    if (q) {
+      if (ch === "`" || q === '"' && ch === "$" && next === "(") return null;
+      if (ch === "\\" && q === '"') {
+        cur += ch + (next ?? "");
+        i++;
+        continue;
+      }
+      if (ch === q) q = null;
+      cur += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      q = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === "\\") {
+      cur += ch + (next ?? "");
+      i++;
+      continue;
+    }
+    if (ch === "{" && next === "}") {
+      cur += "{}";
+      i++;
+      continue;
+    }
+    if ("`(){}\n".includes(ch) || ch === "$" && next === "(" || ch === "<" && next === "<") return null;
+    if (ch === "&" && next === "&" || ch === "|" && next === "|") {
+      parts.push(cur);
+      ops.push(ch + next);
+      cur = "";
+      i++;
+      continue;
+    }
+    if (ch === ";") {
+      parts.push(cur);
+      ops.push(";");
+      cur = "";
+      continue;
+    }
+    if (ch === "&" && command[i - 1] !== ">" && next !== ">") return null;
+    cur += ch;
+  }
+  if (q) return null;
+  parts.push(cur);
+  const trimmed = parts.map((p) => p.trim());
+  if (trimmed.some((p, i) => !p && i < trimmed.length - 1) || trimmed.some((p) => SHELL_KEYWORDS.has(p.split(/\s+/)[0]))) return null;
+  if (!trimmed[trimmed.length - 1]) {
+    trimmed.pop();
+    ops.pop();
+  }
+  return { parts: trimmed, ops };
+}
 function countLines(filePath) {
   const size = statSync(filePath).size;
   if (size > 5e7) return Infinity;
@@ -1017,11 +1079,29 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
   let key, message, file;
   if (e.tool_name === "Bash") {
     const complete = String(ti.command ?? "").trim();
-    const { prior: prior2, c, trailer } = decompose(complete);
-    if (!c || COMPOUND.test(c) || WATCH_MODE.test(c) || ti.run_in_background || family(c) === "other") return { action: "pass" };
-    if (rules.deny.some((r) => ruleMatches(r, c) || ruleMatches(r, complete))) return { action: "pass" };
-    const autoAllow = e.permission_mode === "bypassPermissions" || READ_ONLY.test(c) || rules.allow.some((r) => ruleMatches(r, c));
-    return { action: "rewrite", command: `${prior2}node ${quote(runJs)} ${quote(c)}${trailer}`, autoAllow };
+    const split = ti.run_in_background ? null : splitCompound(complete);
+    if (!split) return { action: "pass" };
+    if (rules.deny.some((r) => ruleMatches(r, complete))) return { action: "pass" };
+    let changed = false, allAllowed = true;
+    const out = [];
+    for (const part of split.parts) {
+      if (/^cd(\s|$)/.test(part) && !COMPOUND.test(part)) {
+        out.push(part);
+        continue;
+      }
+      const { prior: prior2, c, trailer } = decompose(part);
+      if (rules.deny.some((r) => ruleMatches(r, c) || ruleMatches(r, part))) return { action: "pass" };
+      if (!(READ_ONLY.test(c) || rules.allow.some((r) => ruleMatches(r, c) || ruleMatches(r, part)))) allAllowed = false;
+      if (!c || COMPOUND.test(c) || WATCH_MODE.test(c) || family(c) === "other") {
+        out.push(part);
+        continue;
+      }
+      changed = true;
+      out.push(`${prior2}node ${quote(runJs)} ${quote(c)}${trailer}`);
+    }
+    if (!changed) return { action: "pass" };
+    const command = out.map((p, i) => (i ? ` ${split.ops[i - 1]} ` : "") + p).join("");
+    return { action: "rewrite", command, autoAllow: e.permission_mode === "bypassPermissions" || allAllowed };
   }
   if (e.tool_name === "Read") {
     const f = String(ti.file_path ?? "");
@@ -1122,5 +1202,6 @@ export {
   decide,
   decompose,
   readRules,
-  ruleMatches
+  ruleMatches,
+  splitCompound
 };

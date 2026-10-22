@@ -118,16 +118,29 @@ test("hook Bash: transparent rewrite, permissions respected, compound commands l
   assert.equal(without.action === "rewrite" && without.autoAllow, false); // Claude Code will ask
   assert.equal((decide(bash("git status"), cfg, {}, 0) as { autoAllow: boolean }).autoAllow, true); // read-only
   assert.equal(decide(bash("npm test"), cfg, {}, 0, undefined, { allow: [], deny: ["Bash(npm test:*)"] }).action, "pass");
-  for (const c of ["npm test | tail", "npm test && ls", "rm -rf x", "npm run dev", "vitest --watch", "echo 'a'"]) {
+  for (const c of ["npm test | tail", "ls && echo ok", "rm -rf x", "npm run dev", "vitest --watch", "echo 'a'"]) {
     assert.equal(decide(bash(c), cfg, {}, 0).action, "pass", c);
   }
   const rj = (c: string) => (decide(bash(c), cfg, {}, 0, undefined, { allow: [], deny: [] }, "/x/run.js") as { command?: string }).command;
   assert.equal(rj("npm test 2>&1 | tail -20"), "node '/x/run.js' 'npm test' | tail -20");
   assert.equal(rj("cd server && npm test 2>&1 | head -n 40"), "cd server && node '/x/run.js' 'npm test' | head -n 40");
   assert.equal(rj("npm test 2>&1"), "node '/x/run.js' 'npm test'");
-  for (const c of ["cd $(pwd) && npm test", "npm test | grep x | tail -5", "cd a && npm test && ls"]) {
+  for (const c of ["cd $(pwd) && npm test", "npm test | grep x | tail -5", "npm test &", "for f in a; do npm test; done",
+    "(npm test)", "npm test <<EOF\nx\nEOF", "echo `date`; npm test", "npm test\nls"]) {
     assert.equal(decide(bash(c), cfg, {}, 0).action, "pass", c);
   }
+  for (const c of [".venv/bin/python -m pytest -q", "uv run pytest", "python3.12 -m ruff check src", "node_modules/.bin/jest", "venv/bin/pip install x"]) {
+    assert.equal(decide(bash(c), cfg, {}, 0).action, "rewrite", c);
+  }
+  // Compound commands: each noisy part rewritten, others verbatim, operators kept.
+  assert.equal(rj("cd a && npm test && ls"), "cd a && node '/x/run.js' 'npm test' && ls");
+  assert.equal(rj("find . -name __pycache__ -prune -exec rm -rf {} + ; pytest -q 2>&1 | tail -5"),
+    "find . -name __pycache__ -prune -exec rm -rf {} + ; node '/x/run.js' 'pytest -q' | tail -5");
+  assert.equal(rj("npm test -- -t 'a && b'; git status"), "npm test -- -t 'a && b' ; node '/x/run.js' 'git status'"); // quoted && : split right, part kept (conservative)
+  const both = (allow: string[], deny: string[] = []) => decide(bash("npm test && rm -rf x"), cfg, {}, 0, undefined, { allow, deny });
+  assert.equal((both(["Bash(npm test:*)"]) as { autoAllow: boolean }).autoAllow, false); // rm not allowed → Claude Code asks
+  assert.equal((both(["Bash(npm test:*)", "Bash(rm:*)"]) as { autoAllow: boolean }).autoAllow, true);
+  assert.equal(both(["Bash(npm test:*)"], ["Bash(rm:*)"]).action, "pass"); // a denied part → untouched
   assert.equal(ruleMatches("Bash(git diff *)", "git diff --stat"), true);
   assert.equal(ruleMatches("Bash(git diff:*)", "git difftool"), false);
 });

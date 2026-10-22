@@ -12,8 +12,11 @@ var TESTS = /^(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|^(npx\s+)?(jest|vitest|mocha
 var INSTALL = /^(npm|pnpm|yarn|bun)\s+(install|i|add|ci|update)\b|^pip3?\s+install\b|^(uv\s+)?pip\s+install\b|^poetry\s+(install|add)\b|^cargo\s+(fetch|update)\b|^go\s+(mod|get)\b|^bundle(\s+install)?$|^composer\s+(install|update|require)\b|^brew\s+(install|upgrade)\b/;
 var BUILD = /^(npm|pnpm|yarn|bun)\s+run\s+(build|lint|typecheck|check)\b|^(npx\s+)?(tsc|eslint|biome|prettier\s+--check|ruff|mypy|pyright|next\s+build|vite\s+build|webpack)\b|^cargo\s+(build|check|clippy)\b|^go\s+(build|vet)\b|^make\b|^gradlew?\b|^mvn\b|^dotnet\s+build\b|^swift\s+build\b/;
 var GIT = /^git\s+(status|log|diff|show|branch|fetch|pull|push|commit|add|checkout|switch|merge|rebase|stash)\b/;
+function normalizeCommand(command2) {
+  return command2.trim().replace(/^(?:\S*\/)?(?:\.?venv|env)\/bin\//, "").replace(/^(?:\S*\/)?node_modules\/\.bin\//, "").replace(/^(?:uv|poetry|pipenv|hatch|pdm|rye)\s+run\s+/, "").replace(/^python[\d.]*\s+-m\s+/, "");
+}
 function family(command2) {
-  const c = command2.trim();
+  const c = normalizeCommand(command2);
   if (TESTS.test(c)) return "test";
   if (GIT.test(c)) return "git";
   if (INSTALL.test(c)) return "install";
