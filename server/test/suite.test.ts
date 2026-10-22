@@ -1,0 +1,231 @@
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { get } from "node:http";
+import { join } from "node:path";
+import { readSymbol } from "../src/tools/readSymbol.ts";
+import { batchEdit } from "../src/tools/batchEdit.ts";
+import { estimateTokens } from "../src/tokens.ts";
+import { DatabaseSync } from "node:sqlite";
+import { record, aggregate, byKey, byDay, recent, closeDb, openDb } from "../src/db.ts";
+import { summaryText, statistics, formatTokens, formatUsd } from "../src/stats.ts";
+import { startServer } from "../src/web.ts";
+import { decide, ruleMatches } from "../src/hook.ts";
+import { compact } from "../src/compact.ts";
+import { read } from "../src/tools/read.ts";
+import { searchCompact } from "../src/tools/searchCompact.ts";
+import { DEFAULT_CONFIG } from "../src/config.ts";
+
+let dir: string;
+
+const TS = `/** Doc */
+export function a(x: number) {
+  const o = { b: "}" };
+  return x;
+}
+
+export class C {
+  m() {
+    return 1;
+  }
+}
+export type T = { x: number };
+`;
+const PY = `class K:
+    def f(self):
+        return 1
+
+    def g(self):
+        pass
+
+def h():
+    pass
+`;
+
+before(async () => {
+  dir = await mkdtemp(join(tmpdir(), "token-eco-"));
+  process.env.TOKEN_ECO_HOME = join(dir, "home");
+  await writeFile(join(dir, "a.ts"), TS);
+  await writeFile(join(dir, "b.py"), PY);
+});
+
+after(async () => { closeDb(); await rm(dir, { recursive: true, force: true }); });
+
+test("estimateTokens: chars/4 rounded up", () => {
+  assert.equal(estimateTokens("abcde"), 2);
+  assert.equal(estimateTokens(8), 2);
+  assert.equal(estimateTokens(""), 0);
+});
+
+test("read symbol TS: JSDoc included, brace inside a string ignored", async () => {
+  const r = await readSymbol({ file: "a.ts", name: "a" }, dir);
+  assert.match(r.text, /› a \[1-5\/12\]/);
+  assert.ok(r.text.includes("return x;") && !r.text.includes("class C"));
+  const m = await readSymbol({ file: "a.ts", name: "m" }, dir);
+  assert.match(m.text, /\[8-10\/12\]/);
+  const t = await readSymbol({ file: "a.ts", name: "T" }, dir);
+  assert.match(t.text, /\[12-12\/12\]/);
+  const absent = await readSymbol({ file: "a.ts", name: "zzz" }, dir);
+  assert.match(absent.text, /not found/);
+});
+
+test("read symbol Python: block by indentation", async () => {
+  const k = await readSymbol({ file: "b.py", name: "K" }, dir);
+  assert.match(k.text, /\[1-6\/9\]/);
+  const f = await readSymbol({ file: "b.py", name: "f" }, dir);
+  assert.match(f.text, /\[2-3\/9\]/);
+});
+
+test("read symbol C/TS: definition preferred over prototype, contiguous overloads included", async () => {
+  await writeFile(join(dir, "p.c"), "int f(int a);\n\n#define G compiled_x\nint g(void);\n\nint f(int a) {\n  return a;\n}\n");
+  const f = await readSymbol({ file: "p.c", name: "f" }, dir);
+  assert.match(f.text, /\[6-8\/8\]/);
+  assert.match(f.text, /other occurrences: l\.1/);
+  await writeFile(join(dir, "s.ts"), "export function h(a: string): string;\nexport function h(a: number): number;\nexport function h(a: any): any {\n  return a;\n}\n");
+  const h = await readSymbol({ file: "s.ts", name: "h" }, dir);
+  assert.match(h.text, /\[1-5\/5\]/);
+  await writeFile(join(dir, "t.hpp"), "int x;\ntemplate <typename A,\n          typename B>\nconstexpr auto k(A a) {\n  return a;\n}\n");
+  const k = await readSymbol({ file: "t.hpp", name: "k" }, dir);
+  assert.match(k.text, /\[2-6\/6\]/);
+});
+
+test("hook: full Read of a big file refused then allowed on the 2nd try; small files, ranges and Grep list let through", () => {
+  const cfg = { ...DEFAULT_CONFIG, hook: { mode: "redirect" as const, lineThreshold: 300 } };
+  const lines = (n: number) => () => n;
+  const read = { session_id: "s", tool_name: "Read", tool_input: { file_path: "/p/a.ts" } };
+  const state: Record<string, number> = {};
+  const d1 = decide(read, cfg, state, 1000, lines(800));
+  assert.equal(d1.action, "refused");
+  assert.match((d1 as { message: string }).message, /800 lines.*outline.*repeat the exact same call/s);
+  state[(d1 as { key: string }).key] = 1000;
+  assert.equal(decide(read, cfg, state, 5000, lines(800)).action, "fallback");
+  assert.equal(decide(read, cfg, state, 1000 + 11 * 60_000, lines(800)).action, "refused"); // delay expired
+  assert.equal(decide(read, cfg, {}, 0, lines(100)).action, "pass");
+  assert.equal(decide({ ...read, tool_input: { file_path: "/p/a.ts", offset: 1 } }, cfg, {}, 0, lines(800)).action, "pass");
+  assert.equal(decide({ ...read, tool_input: { file_path: "/p/x.png" } }, cfg, {}, 0, lines(800)).action, "pass");
+  assert.equal(decide({ tool_name: "Grep", tool_input: { pattern: "x" } }, cfg, {}, 0).action, "pass");
+  assert.equal(decide({ tool_name: "Grep", tool_input: { pattern: "x", output_mode: "content" } }, cfg, {}, 0).action, "refused");
+  assert.equal(decide(read, { ...cfg, hook: { mode: "off", lineThreshold: 300 } }, {}, 0, lines(800)).action, "pass");
+});
+
+test("hook Bash: transparent rewrite, permissions respected, compound commands left alone", () => {
+  const cfg = { ...DEFAULT_CONFIG };
+  const bash = (command: string, extra: Record<string, unknown> = {}) => ({ tool_name: "Bash", tool_input: { command }, ...extra });
+  const r = decide(bash("npm test"), cfg, {}, 0, undefined, { allow: ["Bash(npm test:*)"], deny: [] }, "/x/run.js");
+  assert.deepEqual(r, { action: "rewrite", command: "node '/x/run.js' 'npm test'", autoAllow: true });
+  const without = decide(bash("cargo build"), cfg, {}, 0, undefined, { allow: [], deny: [] });
+  assert.equal(without.action === "rewrite" && without.autoAllow, false); // Claude Code will ask
+  assert.equal((decide(bash("git status"), cfg, {}, 0) as { autoAllow: boolean }).autoAllow, true); // read-only
+  assert.equal(decide(bash("npm test"), cfg, {}, 0, undefined, { allow: [], deny: ["Bash(npm test:*)"] }).action, "pass");
+  for (const c of ["npm test | tail", "npm test && ls", "rm -rf x", "npm run dev", "vitest --watch", "echo 'a'"]) {
+    assert.equal(decide(bash(c), cfg, {}, 0).action, "pass", c);
+  }
+  const rj = (c: string) => (decide(bash(c), cfg, {}, 0, undefined, { allow: [], deny: [] }, "/x/run.js") as { command?: string }).command;
+  assert.equal(rj("npm test 2>&1 | tail -20"), "node '/x/run.js' 'npm test' | tail -20");
+  assert.equal(rj("cd server && npm test 2>&1 | head -n 40"), "cd server && node '/x/run.js' 'npm test' | head -n 40");
+  assert.equal(rj("npm test 2>&1"), "node '/x/run.js' 'npm test'");
+  for (const c of ["cd $(pwd) && npm test", "npm test | grep x | tail -5", "cd a && npm test && ls"]) {
+    assert.equal(decide(bash(c), cfg, {}, 0).action, "pass", c);
+  }
+  assert.equal(ruleMatches("Bash(git diff *)", "git diff --stat"), true);
+  assert.equal(ruleMatches("Bash(git diff:*)", "git difftool"), false);
+});
+
+test("compact: test success summarised, errors kept, progress and repeats reduced", () => {
+  const ok = Array.from({ length: 40 }, (_, i) => `  ✓ test ${i}`).join("\n") + "\nTests: 40 passed, 40 total\nTime: 1.2 s";
+  const c = compact("npm test", ok, 0);
+  assert.match(c, /tests passed — 40 passing lines hidden/);
+  assert.match(c, /Tests: 40 passed/);
+  assert.ok(!c.includes("✓ test 3"));
+  const ko = Array.from({ length: 400 }, (_, i) => (i === 200 ? "Error: boom at x.ts:3" : `log ${i}`)).join("\n");
+  const k = compact("npm run build", ko, 1);
+  assert.match(k, /Error: boom/);
+  assert.match(k, /lines omitted by token-eco/);
+  assert.equal(compact("git status", "a\r50%\r100%\nb\nb\nb\n  (use \"git add <file>...\" to update)\n", 0), "100%\nb  (×3)");
+});
+
+test("read: short file whole, long → outline; search without pattern = file list", async () => {
+  await writeFile(join(dir, "long.py"), Array.from({ length: 50 }, (_, i) => `def f${i}():\n    return ${i}\n`).join(""));
+  const short = await read({ file: "b.py" }, dir, 300);
+  assert.match(short.text, /^\[1-9\/9\]/);
+  const long = await read({ file: "long.py" }, dir, 30);
+  assert.match(long.text, /outline only/);
+  assert.match(long.text, /def f49/);
+  const list = await searchCompact({ filter: "*.py" }, dir);
+  assert.match(list.text, /file\(s\) \(exact count\)\n/);
+  assert.match(list.text, /long\.py/);
+});
+
+test("batch edit: all or nothing", async () => {
+  await writeFile(join(dir, "e.txt"), "one\ntwo\nthree\ntwo\n");
+  await assert.rejects(
+    batchEdit({ edits: [{ file: "e.txt", oldText: "one", newText: "1" }, { file: "e.txt", oldText: "two", newText: "2" }] }, dir),
+    /2 occurrences \(l\.2, 4\)/,
+  );
+  assert.equal(await readFile(join(dir, "e.txt"), "utf8"), "one\ntwo\nthree\ntwo\n");
+
+  const r = await batchEdit({ edits: [
+    { file: "e.txt", oldText: "one", newText: "1\n1b" },
+    { file: "e.txt", oldText: "two", newText: "2", all: true },
+  ] }, dir);
+  assert.equal(await readFile(join(dir, "e.txt"), "utf8"), "1\n1b\n2\nthree\n2\n");
+  assert.match(r.text, /^OK: 3 replacement\(s\) in 1 file\(s\)\n {2}e\.txt: l\.1 \(\+1 l\.\); l\.3,5/);
+  assert.ok(r.nativeChars > 0);
+});
+
+test("db: recording and aggregates", () => {
+  const yesterday = new Date(Date.now() - 86_400_000);
+  record({ project: "/p/one", tool: "outline", returnedTokens: 100, nativeTokens: 1000 });
+  record({ project: "/p/two", tool: "lire_plage", returnedTokens: 50, nativeTokens: 550, details: { file: "x.ts" } });
+  record({ project: "/p/one", tool: "outline", returnedTokens: 10, nativeTokens: 110 }, yesterday);
+  assert.deepEqual({ ...aggregate("day") }, { calls: 2, returned: 150, native: 1550, saved: 1400 });
+  assert.equal(aggregate("week").saved, 1500);
+  assert.equal(byKey("tool")[0].key, "outline");
+  assert.equal(byDay(30).length, 2);
+  assert.equal(recent(1)[0].tool, "outline");
+  const s = statistics();
+  // Sonnet 5.5: 5-min cache write $2.50 + 10 later turns × cache read $0.10 = $3.50 per MTok saved.
+  assert.ok(Math.abs(s.total.dollars - (1500 / 1e6) * 3.5) < 1e-12);
+  assert.match(summaryText(), /ESTIMATED[\s\S]*Total\s+1\.5K tokens/);
+  const p = statistics({ project: "/p/one", days: 7 });
+  assert.equal(p.range.saved, 1000);
+  assert.equal(p.stack.by, "tool");
+  assert.equal(p.projects[0].key, "/p/two"); // most recent activity first (same second: insertion order)
+  assert.equal(formatTokens(4_560_000), "4.56M");
+  assert.equal(formatTokens(12_345), "12.3K");
+  assert.equal(formatUsd(0.004), "<$0.01");
+  assert.equal(formatUsd(1234.5), "$1,234.50");
+});
+
+test("db: pre-0.4 French schema migrated in place", () => {
+  const f = join(dir, "old.db");
+  const old = new DatabaseSync(f);
+  old.exec(`CREATE TABLE appels (id INTEGER PRIMARY KEY, ts TEXT NOT NULL, projet TEXT NOT NULL, outil TEXT NOT NULL,
+      tokens_renvoyes INTEGER NOT NULL, tokens_natif_estimes INTEGER NOT NULL, duree_ms INTEGER, details TEXT);
+    CREATE TABLE redirections (id INTEGER PRIMARY KEY, ts TEXT NOT NULL, session TEXT, outil TEXT NOT NULL, cible TEXT, issue TEXT NOT NULL);
+    INSERT INTO appels VALUES (1, '2026-01-01T00:00:00Z', '/p', 'apercu', 10, 100, 5, '{"fichier":"a.ts","mode":"lignes"}');
+    INSERT INTO redirections VALUES (1, '2026-01-01T00:00:00Z', 's', 'Read', 'a.ts', 'refus');`);
+  old.close();
+  closeDb();
+  const d = openDb(f);
+  assert.deepEqual({ ...d.prepare("SELECT project, tool, returned_tokens, details FROM calls").get() },
+    { project: "/p", tool: "read", returned_tokens: 10, details: '{"file":"a.ts","mode":"lines"}' });
+  assert.equal((d.prepare("SELECT outcome FROM redirections").get() as { outcome: string }).outcome, "refused");
+  closeDb();
+});
+
+test("web: API, page and foreign Host rejected", async () => {
+  const fixed = 47123;
+  const srv2 = await startServer(fixed);
+  try {
+    const s = await (await fetch(`http://127.0.0.1:${fixed}/api/stats`)).json();
+    assert.equal(s.total.calls, 3);
+    const page = await fetch(`http://localhost:${fixed}/`);
+    assert.match(await page.text(), /estimates/);
+    const status = await new Promise<number>((ok, ko) =>
+      get({ host: "127.0.0.1", port: fixed, path: "/api/stats", headers: { Host: "evil.com" } }, (r) => { r.resume(); ok(r.statusCode!); })
+        .on("error", ko));
+    assert.equal(status, 403);
+  } finally { srv2.close(); }
+});

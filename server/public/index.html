@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>token-eco · savings</title>
+<style>
+:root{--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+:root,[data-theme=light]{--bg:#f4f3ef;--panel:#fffefb;--card:linear-gradient(180deg,#fffefb,#faf9f5);--line:#e6e4dd;--text:#1f1e1b;
+  --muted:#76736b;--faint:#aaa79e;--track:#efede7;--acc:#2a8a46;--accbg:#e5f3e8;--bad:#b4401b;--glow:0}
+[data-theme=dark]{--bg:#070707;--panel:#0d0d0c;--card:linear-gradient(180deg,#111110,#0a0a09);--line:#1e1e1c;--text:#f2f1ec;
+  --muted:#8e8b83;--faint:#57554f;--track:#161614;--acc:#5fe08a;--accbg:#10231a;--bad:#ff6b5b;--glow:1}
+@media (prefers-color-scheme:dark){[data-theme=auto]{--bg:#070707;--panel:#0d0d0c;--card:linear-gradient(180deg,#111110,#0a0a09);
+  --line:#1e1e1c;--text:#f2f1ec;--muted:#8e8b83;--faint:#57554f;--track:#161614;--acc:#5fe08a;--accbg:#10231a;--bad:#ff6b5b;--glow:1}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 var(--sans)}
+button,select,input{font:inherit;color:inherit}
+.app{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}
+.side{border-right:1px solid var(--line);padding:24px 16px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:18px;overflow:auto}
+.brand{display:flex;align-items:center;gap:10px;font:600 16px var(--mono);letter-spacing:-.02em;padding:0 6px}
+.brand svg{width:30px;height:30px;flex:none}
+.brand small{display:block;font:11px var(--mono);color:var(--muted);letter-spacing:0}
+.label{font:11px var(--mono);text-transform:uppercase;letter-spacing:.09em;color:var(--faint);margin:0 0 8px;padding:0 6px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.item{all:unset;cursor:pointer;display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:9px;
+  font:13px var(--mono);padding:8px 10px;border-radius:10px;color:var(--muted);border:1px solid transparent}
+.item:hover{color:var(--text);background:var(--track)}
+.item.on{color:var(--text);background:var(--panel);border-color:var(--line)}
+.item .sw{width:9px;height:9px;border-radius:3px;background:var(--c,var(--faint));box-shadow:0 0 calc(var(--glow)*8px) var(--c,transparent)}
+.item .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .ct{font-size:11px;color:var(--faint)}
+.side .foot{margin-top:auto;display:flex;flex-direction:column;gap:10px;padding:0 6px}
+.seg{display:inline-flex;background:var(--track);border-radius:10px;padding:3px;gap:2px}
+.seg button{all:unset;cursor:pointer;font:12px var(--mono);padding:5px 10px;border-radius:8px;color:var(--muted)}
+.seg button.on{background:var(--panel);color:var(--text);box-shadow:0 1px 0 var(--line)}
+.live{font:11px var(--mono);color:var(--muted);display:flex;align-items:center;gap:7px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 calc(var(--glow)*8px) var(--acc)}
+.link{all:unset;cursor:pointer;font:12px var(--mono);color:var(--muted)}.link:hover{color:var(--bad)}
+main{padding:26px 32px 48px;display:flex;flex-direction:column;gap:18px;max-width:1280px}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+h1{font:600 24px var(--mono);letter-spacing:-.03em;margin:0;display:flex;align-items:center;gap:10px}
+h1 .sw{width:12px;height:12px;border-radius:4px;background:var(--c,var(--acc));box-shadow:0 0 calc(var(--glow)*12px) var(--c,var(--acc))}
+.meta{font:12px var(--mono);color:var(--muted);margin-top:6px}
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+select{background:var(--track);border:0;border-radius:10px;padding:7px 10px;font:12px var(--mono)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}
+.kpi .v{font:600 30px/1.1 var(--mono);letter-spacing:-.04em}
+.kpi.main .v{color:var(--acc);text-shadow:0 0 calc(var(--glow)*24px) color-mix(in srgb,var(--acc) 45%,transparent)}
+.kpi .d{font:12px var(--mono);color:var(--muted);margin-top:6px}
+.grid2{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:18px}
+h2{font:600 13px var(--mono);margin:0 0 14px;display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+h2 span{font-weight:400;color:var(--faint);font-size:11px}
+#chart svg{width:100%;height:200px;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.legend button{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font:11px var(--mono);color:var(--muted);
+  padding:4px 8px;border-radius:999px;background:var(--track)}
+.legend button i{width:8px;height:8px;border-radius:2px;background:var(--c)}
+.legend button.off{opacity:.4;text-decoration:line-through}
+.rows{display:flex;flex-direction:column;gap:12px}
+.row .t{display:flex;justify-content:space-between;gap:10px;font:12px var(--mono);margin-bottom:5px}
+.row .t b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.row .t em{font-style:normal;color:var(--muted);white-space:nowrap}
+.bar{height:8px;border-radius:999px;background:var(--track);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:999px;background:var(--c,var(--acc));box-shadow:0 0 calc(var(--glow)*10px) color-mix(in srgb,var(--c,var(--acc)) 50%,transparent)}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tiles div{background:var(--track);border-radius:12px;padding:11px 13px}
+.tiles b{display:block;font:600 19px var(--mono)}.tiles small{font:11px var(--mono);color:var(--muted)}
+.note{font:11px/1.5 var(--mono);color:var(--faint)}
+.note a{color:var(--muted)}
+.search{background:var(--track);border:0;border-radius:10px;padding:7px 11px;font:12px var(--mono);width:220px}
+table{width:100%;border-collapse:collapse;font:12px var(--mono);table-layout:fixed}
+th{text-align:left;font-weight:400;color:var(--faint);padding:0 8px 8px;border-bottom:1px solid var(--line)}
+td{padding:8px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
+.tag{display:inline-flex;align-items:center;gap:6px}.tag i{width:7px;height:7px;border-radius:2px;background:var(--c,var(--faint))}
+.empty{color:var(--muted);font:12px var(--mono);padding:8px 0}
+@media (max-width:1000px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:820px){.app{grid-template-columns:minmax(0,1fr)}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
+  .grid2{grid-template-columns:minmax(0,1fr)}main{padding:20px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="none" stroke="currentColor" stroke-opacity=".25"/>
+        <path d="M8 22c0-8 6-13 16-13-1 9-6 15-13 15-1 0-2 0-3-.5" fill="none" stroke="var(--acc)" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M9 23l8-8" stroke="var(--acc)" stroke-width="2.2" stroke-linecap="round"/></svg>
+      <div>token-eco<small>local savings board</small></div>
+    </div>
+    <div><p class="label">Projects</p><nav class="nav" id="projects"></nav></div>
+    <div class="foot">
+      <div class="seg" id="themes"><button data-t="auto">Auto</button><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
+      <div class="live"><span class="dot"></span><span id="updated">connecting…</span></div>
+      <button class="link" id="stop">■ Stop dashboard</button>
+    </div>
+  </aside>
+  <main>
+    <div class="top">
+      <div><h1><span class="sw" id="titleSw"></span><span id="title">All projects</span></h1><div class="meta" id="meta"></div></div>
+      <div class="controls">
+        <div class="seg" id="periods"><button data-d="7">7d</button><button data-d="30">30d</button><button data-d="90">90d</button><button data-d="0">All</button></div>
+        <select id="model" title="Model used to price the saved tokens"></select>
+      </div>
+    </div>
+    <section class="kpis">
+      <div class="card kpi main"><p class="label">Saved (est.)</p><div class="v" id="kDollars">–</div><div class="d" id="kDollarsSub"></div></div>
+      <div class="card kpi"><p class="label">Tokens saved</p><div class="v" id="kTokens">–</div><div class="d" id="kTokensSub"></div></div>
+      <div class="card kpi"><p class="label">Reduction</p><div class="v" id="kPct">–</div><div class="d" id="kPctSub"></div></div>
+      <div class="card kpi"><p class="label">Tool calls</p><div class="v" id="kCalls">–</div><div class="d" id="kCallsSub"></div></div>
+    </section>
+    <section class="card"><h2><span style="color:var(--text);font-size:13px;font-weight:600" id="chartTitle">Tokens saved per day</span><span id="chartInfo"></span></h2>
+      <div id="chart"></div><div class="legend" id="legend"></div></section>
+    <div class="grid2">
+      <section class="card"><h2>By tool <span>tokens saved · reduction · calls</span></h2><div class="rows" id="tools"></div></section>
+      <section class="card" id="sideCard"><h2 id="sideTitle">By project <span>tokens saved</span></h2><div class="rows" id="sideRows"></div></section>
+    </div>
+    <div class="grid2">
+      <section class="card"><h2>Pricing <span id="priceChecked"></span></h2><div class="tiles" id="prices"></div>
+        <p class="note" id="formula" style="margin:12px 0 0"></p></section>
+      <section class="card"><h2>Hook <span>built-in calls redirected (all projects)</span></h2><div class="tiles" id="hook"></div>
+        <p class="note" style="margin:12px 0 0">Refused = a full Read / content Grep was answered with an outline or a hint instead. Retry = the agent still asked for the original (allowed the second time).</p></section>
+    </div>
+    <section class="card"><h2>Recent calls <input class="search" id="q" placeholder="Filter: tool, project, file…" autocomplete="off"></h2><div id="recent"></div></section>
+    <p class="note">All figures are estimates (assumed size of the equivalent built-in tool output), not an invoice.</p>
+  </main>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const nf = new Intl.NumberFormat("en-US");
+const tok = (n) => { const a = Math.abs(n); return a < 1000 ? nf.format(Math.round(n)) : a < 1e6 ? `${+(n / 1e3).toFixed(1)}K` : `${+(n / 1e6).toFixed(2)}M`; };
+const usd = (d) => d > 0 && d < 0.01 ? "<$0.01" : `$${d.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const pct = (a) => a.native ? Math.round(a.saved / a.native * 100) : 0;
+const base = (p) => String(p).split(/[\\/]/).filter(Boolean).pop() || String(p);
+const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 90 ? "just now" : s < 5400 ? `${Math.round(s / 60)} min ago`
+  : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
+const PALETTE = ["#5fb8ff", "#5fe08a", "#ffb35c", "#d38bff", "#ff7a8a", "#f1d36b", "#5ce0d0", "#9aa3ff", "#ff9e6b", "#b7e05f"];
+const store = (k, v) => v === undefined ? localStorage.getItem(`te-${k}`) : localStorage.setItem(`te-${k}`, v);
+const state = { project: store("project") || "", days: Number(store("days") ?? 30), model: store("model") || "", q: "", hidden: new Set() };
+let data = null, colors = new Map();
+const colorOf = (k) => colors.get(k) ?? "var(--faint)";
+
+function theme(t) {
+  document.documentElement.dataset.theme = t; store("theme", t);
+  for (const b of $("themes").children) b.classList.toggle("on", b.dataset.t === t);
+}
+theme(store("theme") || "auto");
+$("themes").onclick = (e) => e.target.dataset.t && theme(e.target.dataset.t);
+$("periods").onclick = (e) => { if (e.target.dataset.d) { state.days = Number(e.target.dataset.d); store("days", state.days); load(); } };
+$("model").onchange = (e) => { state.model = e.target.value; store("model", state.model); load(); };
+$("q").oninput = (e) => { state.q = e.target.value.toLowerCase(); renderRecent(); };
+$("stop").onclick = async () => { await fetch("/api/stop", { method: "POST" }).catch(() => {}); $("updated").textContent = "stopped"; clearInterval(timer); };
+function pick(project) { state.project = project; state.hidden.clear(); store("project", project); load(); }
+
+function bars(el, list, label, color) {
+  const max = Math.max(1, ...list.map((a) => a.saved));
+  el.innerHTML = list.length ? list.slice(0, 8).map((a) => `<div class="row"><div class="t"><b title="${esc(a.key)}">${esc(label(a.key))}</b>
+    <em>${tok(a.saved)} · −${pct(a)}% · ${nf.format(a.calls)}</em></div>
+    <div class="bar"><i style="width:${Math.max(2, a.saved / max * 100)}%;${color ? `--c:${color(a.key)}` : ""}"></i></div></div>`).join("")
+    : `<div class="empty">Nothing yet for this scope.</div>`;
+}
+
+function dayKeys(n) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+function chart() {
+  const rows = data.stack.rows, first = rows[0]?.day;
+  const span = state.days || (first ? Math.max(7, Math.ceil((Date.now() - new Date(first)) / 864e5) + 1) : 30);
+  const days = dayKeys(Math.min(span, 365)), keys = [...new Set(rows.map((r) => r.key))];
+  const keyColor = (k) => data.stack.by === "project" ? colorOf(k) : PALETTE[keys.indexOf(k) % PALETTE.length];
+  const cell = new Map(rows.map((r) => [`${r.day}|${r.key}`, r]));
+  const shown = keys.filter((k) => !state.hidden.has(k));
+  const totals = days.map((d) => shown.reduce((s, k) => s + Math.max(0, cell.get(`${d}|${k}`)?.saved ?? 0), 0));
+  const max = Math.max(1, ...totals), W = 900, H = 200, B = 20, step = W / days.length, w = Math.max(1, step * .72);
+  let svg = [0.5, 1].map((f) => `<line x1="0" x2="${W}" y1="${H - B - f * (H - B - 8)}" y2="${H - B - f * (H - B - 8)}" stroke="var(--line)"/>
+    <text x="${W}" y="${H - B - f * (H - B - 8) - 4}" font-size="10" fill="var(--faint)" text-anchor="end" font-family="ui-monospace,Menlo,monospace">${tok(max * f)}</text>`).join("");
+  days.forEach((d, i) => {
+    let y = H - B;
+    if (!totals[i]) svg += `<rect x="${i * step + (step - w) / 2}" y="${H - B - 2}" width="${w}" height="2" rx="1" fill="var(--track)"/>`;
+    for (const k of shown) {
+      const v = Math.max(0, cell.get(`${d}|${k}`)?.saved ?? 0); if (!v) continue;
+      const h = v / max * (H - B - 8); y -= h;
+      svg += `<rect x="${i * step + (step - w) / 2}" y="${y}" width="${w}" height="${Math.max(1, h)}" rx="${Math.min(3, w / 3)}" fill="${keyColor(k)}">
+        <title>${d} · ${esc(data.stack.by === "project" ? base(k) : k)}: ${tok(v)} tokens</title></rect>`;
+    }
+  });
+  for (const i of [0, Math.floor(days.length / 2), days.length - 1]) {
+    svg += `<text x="${i * step + step / 2}" y="${H - 4}" font-size="10" fill="var(--faint)" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">${days[i].slice(5)}</text>`;
+  }
+  $("chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${svg}</svg>`;
+  $("chartTitle").textContent = `Tokens saved per day, by ${data.stack.by}`;
+  $("chartInfo").textContent = `${totals.filter(Boolean).length} active day(s) · ${tok(totals.reduce((a, b) => a + b, 0))} tokens`;
+  $("legend").innerHTML = keys.map((k) => `<button data-k="${esc(k)}" class="${state.hidden.has(k) ? "off" : ""}" style="--c:${keyColor(k)}">
+    <i></i>${esc(data.stack.by === "project" ? base(k) : k)}</button>`).join("");
+}
+$("legend").onclick = (e) => { const b = e.target.closest("button"); if (!b) return;
+  state.hidden.has(b.dataset.k) ? state.hidden.delete(b.dataset.k) : state.hidden.add(b.dataset.k); chart(); };
+
+function renderRecent() {
+  const list = data.recent.filter((x) => !state.q || `${x.tool} ${x.project} ${x.details ?? ""}`.toLowerCase().includes(state.q));
+  $("recent").innerHTML = list.length ? `<table><colgroup><col style="width:120px"><col style="width:90px"><col><col><col style="width:80px"><col style="width:80px"><col style="width:80px"></colgroup>
+    <tr><th>When</th><th>Tool</th><th>Project</th><th>Detail</th><th class="n">Returned</th><th class="n">Native</th><th class="n">Saved</th></tr>
+    ${list.map((x) => { const g = x.native - x.returned; let det = ""; try { const o = JSON.parse(x.details || "{}"); det = o.file ?? o.pattern ?? o.command ?? ""; } catch {}
+      return `<tr><td title="${esc(x.ts)}">${esc(ago(x.ts))}</td><td>${esc(x.tool)}</td>
+      <td title="${esc(x.project)}"><span class="tag" style="--c:${colorOf(x.project)}"><i></i>${esc(base(x.project))}</span></td><td title="${esc(det)}">${esc(det)}</td>
+      <td class="n">${tok(x.returned)}</td><td class="n">${tok(x.native)}</td><td class="n ${g >= 0 ? "ok" : "ko"}">${g >= 0 ? "−" : "+"}${tok(Math.abs(g))}</td></tr>`; }).join("")}</table>`
+    : `<div class="empty">No calls match.</div>`;
+}
+
+function render() {
+  const d = data, r = d.range, p = d.pricing;
+  colors = new Map(d.projects.map((x, i) => [x.key, PALETTE[i % PALETTE.length]]));
+  const total = d.projects.reduce((s, x) => s + x.calls, 0);
+  $("projects").innerHTML = [["", "All projects", total, "var(--text)"], ...d.projects.map((x) => [x.key, base(x.key), x.calls, colorOf(x.key)])]
+    .map(([k, n, c, col]) => `<button class="item ${state.project === k ? "on" : ""}" data-p="${esc(k)}" title="${esc(k || "All projects")}" style="--c:${col}">
+      <span class="sw"></span><span class="nm">${esc(n)}</span><span class="ct">${nf.format(c)}</span></button>`).join("");
+  for (const b of $("periods").children) b.classList.toggle("on", Number(b.dataset.d) === state.days);
+  const cur = d.projects.find((x) => x.key === state.project);
+  $("title").textContent = cur ? base(cur.key) : "All projects";
+  $("titleSw").style.setProperty("--c", cur ? colorOf(cur.key) : "var(--acc)");
+  $("meta").textContent = cur ? `${cur.key} · since ${new Date(cur.first).toLocaleDateString("en-US", { dateStyle: "medium" })} · last active ${ago(cur.last)} · mostly ${cur.topTool}`
+    : `${d.projects.length} project(s) · ${state.days ? `last ${state.days} days` : "all time"}`;
+  $("model").innerHTML = p.models.map((m) => `<option value="${m.key}" ${m.key === p.model ? "selected" : ""}>${esc(m.label)}</option>`).join("");
+  $("kDollars").textContent = usd(r.dollars);
+  $("kDollarsSub").textContent = `today ${usd(d.today.dollars)} · 7d ${usd(d.week.dollars)}`;
+  $("kTokens").textContent = tok(r.saved); $("kTokens").title = `${nf.format(r.saved)} tokens`;
+  $("kTokensSub").textContent = `${tok(r.returned)} sent instead of ${tok(r.native)}`;
+  $("kPct").textContent = `−${pct(r)}%`; $("kPctSub").textContent = "vs built-in tool output";
+  $("kCalls").textContent = nf.format(r.calls); $("kCallsSub").textContent = `today ${nf.format(d.today.calls)} · total ${nf.format(d.total.calls)}`;
+  chart();
+  bars($("tools"), d.byTool, (k) => k);
+  if (cur) {
+    $("sideTitle").innerHTML = `Days <span>tokens saved, most recent first</span>`;
+    bars($("sideRows"), [...d.byDay].reverse().map((x) => ({ ...x, key: x.day })), (k) => k);
+  } else {
+    $("sideTitle").innerHTML = `By project <span>tokens saved · reduction · calls</span>`;
+    bars($("sideRows"), d.byProject, base, colorOf);
+  }
+  const m = p.models.find((x) => x.key === p.model);
+  $("priceChecked").textContent = `$/MTok · checked ${p.checked}`;
+  $("prices").innerHTML = [["Input", m.input], ["Cache write (5 min)", m.cacheWrite5m], ["Cache read", m.cacheRead], ["Output", m.output]]
+    .map(([n, v]) => `<div><b>$${v}</b><small>${n}</small></div>`).join("");
+  $("formula").innerHTML = `1 saved token is worth <b style="color:var(--text)">$${p.rate.toFixed(2)}/MTok</b> here: ${esc(p.formula)}.
+    A tool result is written to the prompt cache once, then re-read on every later turn. Source: <a href="${esc(p.source)}" target="_blank" rel="noopener">Anthropic pricing</a>.`;
+  const h = d.redirections[state.days === 7 ? "week" : "total"];
+  $("hook").innerHTML = `<div><b>${nf.format(h.refused)}</b><small>refused, outline given</small></div>
+    <div><b>${nf.format(h.fallbacks)}</b><small>retried${h.refused ? ` (${Math.round(h.fallbacks / h.refused * 100)}%)` : ""}</small></div>`;
+  renderRecent();
+}
+$("projects").onclick = (e) => { const b = e.target.closest("button"); if (b) pick(b.dataset.p); };
+
+async function load() {
+  try {
+    const qs = new URLSearchParams({ days: String(state.days), ...(state.project ? { project: state.project } : {}), ...(state.model ? { model: state.model } : {}) });
+    data = await (await fetch(`/api/stats?${qs}`)).json();
+    if (state.project && !data.projects.some((x) => x.key === state.project)) return pick("");
+    $("updated").textContent = `updated ${new Date().toLocaleTimeString("en-US")}`;
+    render();
+  } catch { $("updated").textContent = "server unreachable"; }
+}
+load();
+const timer = setInterval(load, 10000);
+</script>
+</body>
+</html>

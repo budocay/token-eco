@@ -1,0 +1,10 @@
+{
+  "name": "token-eco",
+  "version": "0.4.1",
+  "description": "Token-saving file tools (MCP), a main agent that prefers them, compact Bash output and a local savings dashboard.",
+  "author": { "name": "Alexis Lina" },
+  "homepage": "https://github.com/budocay/token-eco",
+  "repository": "https://github.com/budocay/token-eco",
+  "license": "MIT",
+  "keywords": ["tokens", "mcp", "token-saving"]
+}

@@ -1,0 +1,21 @@
+node_modules/
+.idea/
+.vscode/
+.DS_Store
+*.db
+*.log
+.env*
+
+# Private working notes (not published)
+ETAT.md
+RAPPORT_TEST_*.md
+demande.txt
+main.py
+
+# Local debug scripts and raw benchmark output
+server/diag*.ts
+server/bench/ab-raw*.json
+# Not yet regenerated in English
+server/bench/AB*.md
+server/bench/LANGUAGES.md
+server/bench/RESULTS.md

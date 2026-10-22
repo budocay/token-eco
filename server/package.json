@@ -1,0 +1,23 @@
+{
+  "name": "token-eco-server",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
+  "description": "MCP server of token-saving file tools (token-eco Claude Code plugin)",
+  "scripts": {
+    "build": "esbuild src/index.ts src/cli.ts src/hook.ts src/run.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/",
+    "bench": "node bench/bench.ts",
+    "bench:ab": "node bench/ab.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  }
+}

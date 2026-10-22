@@ -1,0 +1,13 @@
+{
+  "name": "token-eco-marketplace",
+  "description": "Personal marketplace: the token-eco plugin (token-saving tools).",
+  "owner": { "name": "Alexis Lina" },
+  "plugins": [
+    {
+      "name": "token-eco",
+      "source": "./",
+      "description": "Token-saving file tools + savings dashboard.",
+      "version": "0.4.1"
+    }
+  ]
+}
