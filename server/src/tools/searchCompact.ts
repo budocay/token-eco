@@ -27,7 +27,13 @@ export interface SearchArgs {
   mode?: "lines" | "files" | "count";
   /** Lines mode: shows the function/class containing each hit (for a direct `read name=`). */
   symbols?: boolean;
+  /** Lines mode: returns the whole body of the function/class containing each hit (search + read in one call). */
+  expand?: boolean;
 }
+
+/** expand: longest symbol body returned whole, and total budget of expanded text per search (≈ 6k tokens). */
+export const EXPAND_MAX_LINES = 150;
+export const EXPAND_CAP = 24_000;
 
 const DECL_KEYWORD = /\b(?:function|class|def|fn|func|struct|interface|type|enum|trait|impl|module|object|record|protocol|extension|macro|sub|proc|method)\s+([A-Za-z_$][\w$.:]*)/;
 
@@ -38,8 +44,10 @@ export function declarationName(line: string): string {
   return m ? m[1] : truncate(t, 50);
 }
 
-/** Function i → name of the innermost symbol containing line i (undefined at top level). */
-function enclosingSymbol(file: string, lines: string[]): (i: number) => string | undefined {
+interface Span { start: number; end: number; label: string }
+
+/** Function i → innermost symbol containing line i (0-based span; undefined at top level). */
+function enclosingSymbol(file: string, lines: string[]): (i: number) => Span | undefined {
   const p = profileFor(file, lines.slice(0, 5).join("\n"));
   const mask = computeMask(lines, p);
   const decls = declarations(lines, p, mask);
@@ -52,7 +60,9 @@ function enclosingSymbol(file: string, lines: string[]): (i: number) => string |
       if (end === undefined) { end = blockEnd(lines, d, p, mask); ends.set(d, end); }
       if (end >= i) best = d; // decls are sorted: the last one containing i is the innermost
     }
-    return best === undefined ? undefined : `${declarationName(lines[best])} L${best + 1}-${ends.get(best)! + 1}`;
+    if (best === undefined) return undefined;
+    const end = ends.get(best)!;
+    return { start: best, end, label: `${declarationName(lines[best])} L${best + 1}-${end + 1}` };
   };
 }
 
@@ -96,7 +106,7 @@ export async function searchCompact(args: SearchArgs, cwd: string = process.cwd(
 
   const mode = args.mode ?? "lines";
   const blocks: string[] = [];
-  let fileCount = 0, totalCount = 0, shownCount = 0, nativeChars = 0;
+  let fileCount = 0, totalCount = 0, shownCount = 0, nativeChars = 0, expandBudget = EXPAND_CAP;
 
   for await (const f of files) {
     const rel = relative(cwd, f).split(sep).join("/") || f;
@@ -140,12 +150,32 @@ export async function searchCompact(args: SearchArgs, cwd: string = process.cwd(
     }
     const seen = new Set<number>();
     const output: string[] = [rel];
-    const enclosing = args.symbols ? enclosingSymbol(f, lines) : null;
+    const enclosing = args.symbols || args.expand ? enclosingSymbol(f, lines) : null;
     let lastSymbol: string | undefined;
+    const expanded = new Set<string>();
     for (const i of toShow) {
+      if (args.expand && seen.has(i)) continue; // already inside an expanded body
+      const span = enclosing?.(i);
+      // expand: the whole enclosing body once (exact lines, `n|code` like read), if small enough and in budget.
+      if (args.expand && span) {
+        if (expanded.has(span.label)) continue;
+        const n = span.end - span.start + 1;
+        const body = lines.slice(span.start, span.end + 1).map((l, k) => `${span.start + k + 1}|${truncate(l, 500)}`);
+        const size = body.reduce((s, l) => s + l.length + 1, 0);
+        if (n <= EXPAND_MAX_LINES && expandBudget >= size) {
+          expanded.add(span.label);
+          expandBudget -= size;
+          output.push(`  › ${span.label}`, ...body);
+          // Native equivalent: a Read of the same range on top of the grep line.
+          nativeChars += lines.slice(span.start, span.end + 1).reduce((s, l, k) => s + l.length + String(span.start + k + 1).length + 2, 0);
+          for (let j = span.start; j <= span.end; j++) seen.add(j);
+          lastSymbol = span.label;
+          continue;
+        }
+      }
       if (enclosing) {
-        const s = enclosing(i);
-        if (s !== lastSymbol) { output.push(`  › ${s ?? "(top level)"}`); lastSymbol = s; }
+        const s = span?.label;
+        if (s !== lastSymbol) { output.push(`  › ${s ?? "(top level)"}${args.expand && span ? " (too long or over budget: read name=…)" : ""}`); lastSymbol = s; }
       }
       const from = Math.max(0, i - ctx), a = Math.min(lines.length - 1, i + ctx);
       if (ctx && output.length > 1 && !seen.has(from - 1) && !seen.has(from)) output.push("  --");
@@ -170,4 +200,29 @@ export async function searchCompact(args: SearchArgs, cwd: string = process.cwd(
     nativeChars,
     details: { pattern: args.pattern, mode, files: fileCount, results: totalCount },
   };
+}
+
+/** Cap of the text returned by a batch search (≈ 10k tokens), like readMany. */
+export const MANY_CAP = 40_000;
+
+/**
+ * Several searches in ONE call (every extra call costs a full turn). A failing query does not
+ * cancel the others; past the cap, the remaining queries are listed without being run.
+ */
+export async function searchMany(queries: SearchArgs[], cwd: string = process.cwd(), cap = MANY_CAP): Promise<ToolResult> {
+  const chunks: string[] = [];
+  let native = 0, size = 0, i = 0;
+  const label = (q: SearchArgs) => `${q.pattern ?? `files ${q.filter ?? ""}`}${q.filePath ? ` in ${q.filePath}` : ""}`;
+  for (; i < queries.length; i++) {
+    let text: string;
+    try {
+      const r = await searchCompact(queries[i], cwd);
+      text = r.text; native += r.nativeChars;
+    } catch (e) { text = `error: ${(e as Error).message}`; }
+    const block = `=== ${label(queries[i])} ===\n${text}`;
+    if (size + block.length > cap && chunks.length) break;
+    chunks.push(block); size += block.length;
+  }
+  if (i < queries.length) chunks.push(`[size cap reached; not run: ${queries.slice(i).map(label).join(", ")}]`);
+  return { text: chunks.join("\n\n"), nativeChars: native, details: { queries: queries.length, runCount: i } };
 }

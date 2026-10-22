@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readRange } from "../src/tools/readRange.ts";
 import { outline } from "../src/tools/outline.ts";
-import { searchCompact, globToRegex, declarationName } from "../src/tools/searchCompact.ts";
+import { searchCompact, searchMany, globToRegex, declarationName } from "../src/tools/searchCompact.ts";
 import { readMany } from "../src/tools/read.ts";
 
 let dir: string;
@@ -145,6 +145,29 @@ test("read targets: several reads in one call, isolated error, cap", async () =>
   assert.match(r.text, /=== gros\.txt 2-3 ===[\s\S]*line 3/);
   const cap = await readMany([{ file: "src/a.ts" }, { file: "src/b.py" }], dir, 300, 100);
   assert.match(cap.text, /not read: src\/b\.py/);
+});
+
+test("search expand: whole enclosing body once, exact indentation, top-level hits as lines", async () => {
+  const r = await searchCompact({ pattern: "console\\.log|for \\(let|^import os", expand: true }, dir);
+  assert.match(r.text, /› launch L20-24\n20\|  async launch\(x: number\): Promise<void> \{\n21\|    for/);
+  assert.equal(r.text.match(/› launch/g)?.length, 1); // two hits, one body
+  assert.match(r.text, /src\/b\.py\n  1: import os/);
+  assert.ok(r.nativeChars > 0);
+});
+
+test("search queries: several searches in one call, isolated error, cap", async () => {
+  const r = await searchMany([{ pattern: "console\\.log" }, { pattern: "(" }, { filter: "*.py" }], dir);
+  assert.match(r.text, /=== console\\\.log ===\n1 match/);
+  assert.match(r.text, /=== \( ===\nerror:/);
+  assert.match(r.text, /=== files \*\.py ===\n1 file/);
+  const cap = await searchMany([{ pattern: "class" }, { pattern: "def" }], dir, 50);
+  assert.match(cap.text, /not run: def/);
+});
+
+test("read target with pattern: matching lines of one file with context", async () => {
+  const r = await readMany([{ file: "src/b.py", pattern: "self\\.p", context: 0 }, { file: "src/a.ts", name: "double" }], dir, 300);
+  assert.match(r.text, /=== src\/b\.py \/self\\\.p\/ ===\n2 match\(es\)[\s\S]*8: self\.p = p/);
+  assert.match(r.text, /=== src\/a\.ts double ===/);
 });
 
 test("globToRegex", () => {

@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import type { ToolResult } from "./types.ts";
 import { read, readMany } from "./tools/read.ts";
-import { searchCompact } from "./tools/searchCompact.ts";
+import { searchCompact, searchMany, type SearchArgs } from "./tools/searchCompact.ts";
 import { batchEdit } from "./tools/batchEdit.ts";
 import { record } from "./db.ts";
 import { estimateTokens } from "./tokens.ts";
@@ -50,22 +50,26 @@ server.registerTool(
   {
     description: "Read a file cheaply. name → that symbol's code (function/class/method/type, with doc). start/end → those lines. "
       + "Neither → whole file if short, else an outline (signatures + line numbers) to pick from. "
+      + "pattern → matching lines of that file with context. "
       + "targets → several of these reads in ONE call (batch everything you already know you need).",
     inputSchema: {
       file: z.string().optional().describe("Path relative to the project"),
       name: z.string().optional(),
       start: z.number().int().min(1).optional(),
       end: z.number().int().min(1).optional(),
+      pattern: z.string().optional().describe("Regex: matching lines of file, ±context lines (default 2)"),
+      context: z.number().int().min(0).max(3).optional(),
       targets: z.array(z.object({
         file: z.string(), name: z.string().optional(),
         start: z.number().int().min(1).optional(), end: z.number().int().min(1).optional(),
-      })).max(20).optional().describe("Batch: [{file, name?|start?/end?}, …]"),
+        pattern: z.string().optional(), context: z.number().int().min(0).max(3).optional(),
+      })).max(20).optional().describe("Batch: [{file, name?|start?/end?|pattern?}, …]"),
     },
   },
   adapter("read", async (a) => {
     const threshold = readConfig().hook.lineThreshold;
     const targets = [...(a.file ? [a] : []), ...(a.targets ?? [])]
-      .map((t) => ({ file: t.file as string, name: t.name, start: t.start, end: t.end }));
+      .map((t) => ({ file: t.file as string, name: t.name, start: t.start, end: t.end, pattern: t.pattern, context: t.context }));
     if (!targets.length) throw new Error("give file or targets");
     return targets.length === 1 ? read(targets[0], ROOT, threshold) : readMany(targets, ROOT, threshold);
   }),
@@ -75,8 +79,15 @@ const MODES = { lines: "lines", files: "files", count: "count" } as const;
 server.registerTool(
   "search",
   {
-    description: "Regex search grouped by file, exact totals, capped output; no pattern + glob = list files. Skips .git, node_modules, dist…",
+    description: "Regex search grouped by file, exact totals, capped output; no pattern + glob = list files. Skips .git, node_modules, dist… "
+      + "expand → the whole function/class around each hit (search + read in one call). "
+      + "queries → several searches in ONE call (top-level options are defaults for each).",
     inputSchema: {
+      queries: z.array(z.object({
+        pattern: z.string().optional(), path: z.string().optional(), glob: z.string().optional(),
+        mode: z.enum(["lines", "files", "count"]).optional(), expand: z.boolean().optional(),
+      })).max(10).optional().describe("Batch: [{pattern?, path?, glob?, mode?, expand?}, …]"),
+      expand: z.boolean().optional().describe("Return the whole enclosing function/class of each hit (≤150 lines each)"),
       pattern: z.string().optional().describe("JavaScript regex"),
       path: z.string().optional().describe("Directory or file (default .)"),
       glob: z.string().optional().describe("e.g. *.ts or src/**/*.py"),
@@ -87,10 +98,21 @@ server.registerTool(
       symbols: z.boolean().optional().describe("Label hits with their enclosing function/class + line span, so you can read name=… directly"),
     },
   },
-  adapter("search", (a) => searchCompact({
-    pattern: a.pattern, filePath: a.path, filter: a.glob, ignoreCase: a.ignore_case, symbols: a.symbols,
-    mode: a.mode ? MODES[a.mode] : undefined, maxResults: a.max_results, context: a.context,
-  }, ROOT)),
+  adapter("search", (a) => {
+    const base: SearchArgs = {
+      pattern: a.pattern, filePath: a.path, filter: a.glob, ignoreCase: a.ignore_case, symbols: a.symbols,
+      mode: a.mode ? MODES[a.mode] : undefined, maxResults: a.max_results, context: a.context, expand: a.expand,
+    };
+    if (!a.queries?.length) return searchCompact(base, ROOT);
+    const queries: SearchArgs[] = [
+      ...(a.pattern ? [base] : []),
+      ...a.queries.map((q) => ({
+        ...base, pattern: q.pattern, filePath: q.path ?? base.filePath, filter: q.glob ?? base.filter,
+        mode: q.mode ? MODES[q.mode] : base.mode, expand: q.expand ?? base.expand,
+      })),
+    ];
+    return queries.length === 1 ? searchCompact(queries[0], ROOT) : searchMany(queries, ROOT);
+  }),
 );
 
 server.registerTool(

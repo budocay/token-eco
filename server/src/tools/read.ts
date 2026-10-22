@@ -3,13 +3,18 @@ import { absolutePath, splitLines, type ToolResult } from "../types.ts";
 import { outline } from "./outline.ts";
 import { readRange } from "./readRange.ts";
 import { readSymbol } from "./readSymbol.ts";
+import { searchCompact } from "./searchCompact.ts";
 
 /**
  * Single read tool (fewer tool definitions = lower fixed cost per turn):
  * - name → that symbol's code; start/end → range;
  * - otherwise: short file → whole content, long file → outline + hint.
  */
-export interface ReadArgs { file: string; name?: string; start?: number; end?: number }
+export interface ReadArgs {
+  file: string; name?: string; start?: number; end?: number;
+  /** Matching lines of this file with `context` lines around (default 2): a grep inside a batch read. */
+  pattern?: string; context?: number;
+}
 
 /** Cap of the text returned by a batch read (≈ 10k tokens). */
 export const MULTI_CAP = 40_000;
@@ -25,7 +30,7 @@ export async function readMany(targets: ReadArgs[], cwd: string | undefined, ful
   let native = 0, size = 0, i = 0;
   for (; i < targets.length; i++) {
     const c = targets[i];
-    const what = c.name ? ` ${c.name}` : c.start || c.end ? ` ${c.start ?? 1}-${c.end ?? ""}` : "";
+    const what = c.name ? ` ${c.name}` : c.pattern ? ` /${c.pattern}/` : c.start || c.end ? ` ${c.start ?? 1}-${c.end ?? ""}` : "";
     let text: string;
     try {
       const r = await read(c, cwd, fullThreshold);
@@ -43,6 +48,9 @@ export async function readMany(targets: ReadArgs[], cwd: string | undefined, ful
 
 export async function read(args: ReadArgs, cwd: string | undefined, fullThreshold: number): Promise<ToolResult> {
   if (args.name) return readSymbol({ file: args.file, name: args.name }, cwd);
+  if (args.pattern) {
+    return searchCompact({ pattern: args.pattern, filePath: args.file, context: args.context ?? 2, maxResults: 30 }, cwd);
+  }
   if (args.start || args.end) return readRange(args, cwd);
   const total = splitLines(await readFile(absolutePath(args.file, cwd), "utf8")).length;
   if (total <= fullThreshold) return readRange({ file: args.file, start: 1, end: total }, cwd);
