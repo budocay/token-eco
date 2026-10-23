@@ -22493,6 +22493,7 @@ ${body}`,
 // src/tools/readSymbol.ts
 import { readFile as readFile3 } from "node:fs/promises";
 var MAX_LINES = 400;
+var COMPANION_MAX = 30;
 var DECL_WORDS = "function\\*?|class|interface|type|enum|namespace|module|def|defp|defn|const|let|var|val|struct|trait|impl|fn|func|fun|sub|proc|macro|record|object|protocol|extension|actor|mixin|contract|library|message|service";
 function strongDeclaration(line, n, kws, headings) {
   if (!headings && /^\s*#/.test(line) && !new RegExp(`(?:^|[^\\w$])${n}(?![\\w$])`).test(line)) return false;
@@ -22540,17 +22541,37 @@ async function readSymbol(args, cwd) {
     included.add(c);
     decl = c;
   }
-  const others = candidates.filter((c) => !included.has(c));
+  let others = candidates.filter((c) => !included.has(c));
   const { start, omitted } = startWithPrefixes(lines, decl, profile);
   const shownEnd = Math.min(end, start + MAX_LINES - 1);
-  const width = String(shownEnd + 1).length;
-  const body = lines.slice(start, shownEnd + 1).map((l, k) => `${String(start + k + 1).padStart(width)}|${truncate(l, 500)}`).join("\n");
+  const segments = [[start, shownEnd]];
+  if ((profile.id === "typescript" || profile.id === "javascript") && candidates === strong) {
+    const companions = others.filter((c) => !/^\s/.test(lines[c]) && ends.has(c) && ends.get(c) - c < COMPANION_MAX).slice(0, 3);
+    for (const c of companions) {
+      const s = startWithPrefixes(lines, c, profile).start;
+      segments.push([s, ends.get(c)]);
+    }
+    others = others.filter((c) => !companions.includes(c));
+    segments.sort((a, b) => a[0] - b[0]);
+    for (let k = segments.length - 1; k > 0; k--) {
+      const [prev, cur] = [segments[k - 1], segments[k]];
+      if (lines.slice(prev[1] + 1, cur[0]).every((l) => !l.trim())) {
+        prev[1] = Math.max(prev[1], cur[1]);
+        segments.splice(k, 1);
+      }
+    }
+  }
+  const last = segments[segments.length - 1][1];
+  const width = String(last + 1).length;
+  const body = segments.map(([s, e]) => lines.slice(s, e + 1).map((l, k) => `${String(s + k + 1).padStart(width)}|${truncate(l, 500)}`).join("\n")).join("\n\u2026\n");
+  const first = segments[0][0];
+  const range = segments.length === 1 && first === start && last === shownEnd ? `${start + 1}-${end + 1}` : segments.map(([s, e]) => `${s + 1}-${e + 1}`).join(",");
   const notes = [];
   if (omitted) notes.push(`[${omitted[1] - omitted[0] + 1}-line doc omitted: read_range ${omitted[0]}-${omitted[1]}]`);
   if (shownEnd < end) notes.push(`[truncated at ${MAX_LINES} lines: rest with read_range ${shownEnd + 2}-${end + 1}]`);
   if (others.length) notes.push(`[other occurrences: l.${others.slice(0, 10).map((c) => c + 1).join(", ")}]`);
   return {
-    text: [`${args.file} \u203A ${args.name} [${start + 1}-${end + 1}/${lines.length}]`, body, ...notes].join("\n"),
+    text: [`${args.file} \u203A ${args.name} [${range}/${lines.length}]`, body, ...notes].join("\n"),
     nativeChars,
     details: { file: args.file, name: args.name, language: profile.id, start: start + 1, end: end + 1 }
   };

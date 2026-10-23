@@ -90,6 +90,16 @@ test("read symbol C/TS: definition preferred over prototype, contiguous overload
   assert.match(k.text, /\[2-6\/6\]/);
 });
 
+test("read symbol TS: homonym const + type joined (adjacent merged, distant as segment)", async () => {
+  await writeFile(join(dir, "h.ts"), "export const U = z.object({\n  id: z.string(),\n});\n\nexport type U = z.infer<typeof U>;\n\nfunction use(u: U) {\n  return u;\n}\n\nexport interface U2 {}\nexport type V = 1;\nconst x = 0;\nexport const V = 2;\n");
+  const u = await readSymbol({ file: "h.ts", name: "U" }, dir);
+  assert.match(u.text, /\[1-5\/14\]/);
+  assert.doesNotMatch(u.text, /other occurrences/);
+  const v = await readSymbol({ file: "h.ts", name: "V" }, dir);
+  assert.match(v.text, /\[12-12,14-14\/14\]/);
+  assert.match(v.text, /\n…\n/);
+});
+
 test("hook: full Read of a big file refused then allowed on the 2nd try; small files, ranges and Grep list let through", () => {
   const cfg = { ...DEFAULT_CONFIG, hook: { mode: "redirect" as const, lineThreshold: 300 } };
   const lines = (n: number) => () => n;
