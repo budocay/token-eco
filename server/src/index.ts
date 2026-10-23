@@ -8,12 +8,12 @@ import { batchEdit } from "./tools/batchEdit.ts";
 import { record } from "./db.ts";
 import { estimateTokens } from "./tokens.ts";
 import { summaryText } from "./stats.ts";
-import { readConfig } from "./config.ts";
+import { nodeBinary, readConfig } from "./config.ts";
 import { execFile } from "node:child_process";
 import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const server = new McpServer({ name: "token-eco", version: "0.5.3" });
+const server = new McpServer({ name: "token-eco", version: "0.5.4" });
 
 /** Project root: CLAUDE_PROJECT_DIR when Claude Code provides it, else the cwd. */
 const ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
@@ -148,7 +148,7 @@ server.registerTool(
     // cli.js sits next to index.js in dist/ (cli.ts next to index.ts in dev).
     const cli = fileURLToPath(new URL(`./cli${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
     return new Promise((ok) => {
-      execFile(process.execPath, [cli, "dashboard"], { timeout: 10_000 }, (err, stdout, stderr) =>
+      execFile(nodeBinary(), [cli, "dashboard"], { timeout: 10_000 }, (err, stdout, stderr) =>
         ok(err ? { ...text(`eco_report: ${stderr || err.message}`), isError: true } : text(stdout.trim())));
     });
   },

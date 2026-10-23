@@ -4,6 +4,15 @@ import { join } from "node:path";
 import { DEFAULT_MODEL, PRICES, savedTokenRate } from "./pricing.ts";
 
 /** Data directory (override with TOKEN_ECO_HOME, used by the tests). */
+/**
+ * Node binary to start a child process with. process.execPath can point to a versioned install that no
+ * longer exists (e.g. Homebrew upgraded Node while the long-running MCP server kept the old path):
+ * then fall back to `node` from PATH.
+ */
+export function nodeBinary(execPath = process.execPath): string {
+  return execPath && existsSync(execPath) ? execPath : "node";
+}
+
 export function dataDir(): string {
   const d = process.env.TOKEN_ECO_HOME ?? join(homedir(), ".token-eco");
   mkdirSync(d, { recursive: true });

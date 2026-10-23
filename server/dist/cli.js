@@ -39,12 +39,16 @@ var config_exports = {};
 __export(config_exports, {
   DEFAULT_CONFIG: () => DEFAULT_CONFIG,
   dataDir: () => dataDir,
+  nodeBinary: () => nodeBinary,
   readConfig: () => readConfig,
   toDollars: () => toDollars
 });
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+function nodeBinary(execPath = process.execPath) {
+  return execPath && existsSync(execPath) ? execPath : "node";
+}
 function dataDir() {
   const d = process.env.TOKEN_ECO_HOME ?? join(homedir(), ".token-eco");
   mkdirSync(d, { recursive: true });
@@ -591,7 +595,7 @@ switch (cmd) {
     break;
   case "dashboard": {
     if (!await running()) {
-      spawn(process.execPath, [fileURLToPath2(import.meta.url), "serve"], { detached: true, stdio: "ignore" }).unref();
+      spawn(nodeBinary(), [fileURLToPath2(import.meta.url), "serve"], { detached: true, stdio: "ignore" }).unref();
       for (let i = 0; i < 30 && !await running(); i++) await new Promise((r) => setTimeout(r, 100));
     }
     if (!await running()) {

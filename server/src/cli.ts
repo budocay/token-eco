@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { readConfig } from "./config.ts";
+import { nodeBinary, readConfig } from "./config.ts";
 import { formatTokens, formatUsd, summaryText } from "./stats.ts";
 import { startServer } from "./web.ts";
 
@@ -49,7 +49,7 @@ switch (cmd) {
 
   case "dashboard": {
     if (!(await running())) {
-      spawn(process.execPath, [fileURLToPath(import.meta.url), "serve"], { detached: true, stdio: "ignore" }).unref();
+      spawn(nodeBinary(), [fileURLToPath(import.meta.url), "serve"], { detached: true, stdio: "ignore" }).unref();
       for (let i = 0; i < 30 && !(await running()); i++) await new Promise((r) => setTimeout(r, 100));
     }
     if (!(await running())) {

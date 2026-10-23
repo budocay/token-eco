@@ -303,3 +303,9 @@ test("sessions: real usage from Claude Code logs (dedup by message id, subagents
   assert.equal(c.withEco.tokensPerTurn, Math.round(3 * 1160 / 3)); // 2 main + 1 subagent turn
   await rm(root, { recursive: true, force: true });
 });
+
+test("nodeBinary: falls back to PATH node when the recorded binary vanished (Homebrew upgrade)", async () => {
+  const { nodeBinary } = await import("../src/config.ts");
+  assert.equal(nodeBinary(process.execPath), process.execPath);
+  assert.equal(nodeBinary("/opt/homebrew/Cellar/node/0.0.0/bin/node"), "node");
+});

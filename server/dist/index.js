@@ -22943,6 +22943,9 @@ function savedTokenRate(model, laterTurns) {
 }
 
 // src/config.ts
+function nodeBinary(execPath = process.execPath) {
+  return execPath && existsSync(execPath) ? execPath : "node";
+}
 function dataDir() {
   const d = process.env.TOKEN_ECO_HOME ?? join2(homedir(), ".token-eco");
   mkdirSync(d, { recursive: true });
@@ -23357,7 +23360,7 @@ function summaryText() {
 import { execFile } from "node:child_process";
 import { extname as extname2 } from "node:path";
 import { fileURLToPath } from "node:url";
-var server = new McpServer({ name: "token-eco", version: "0.5.3" });
+var server = new McpServer({ name: "token-eco", version: "0.5.4" });
 var ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 function adapter(name, tool) {
   return async (args) => {
@@ -23495,7 +23498,7 @@ server.registerTool(
     }
     const cli = fileURLToPath(new URL(`./cli${extname2(fileURLToPath(import.meta.url))}`, import.meta.url));
     return new Promise((ok) => {
-      execFile(process.execPath, [cli, "dashboard"], { timeout: 1e4 }, (err, stdout, stderr) => ok(err ? { ...text(`eco_report: ${stderr || err.message}`), isError: true } : text(stdout.trim())));
+      execFile(nodeBinary(), [cli, "dashboard"], { timeout: 1e4 }, (err, stdout, stderr) => ok(err ? { ...text(`eco_report: ${stderr || err.message}`), isError: true } : text(stdout.trim())));
     });
   }
 );
