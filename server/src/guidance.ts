@@ -12,6 +12,8 @@ export const GUIDANCE = [
   "Prefer these tools to Read/Grep/Glob/Edit and to cat/grep/sed in Bash. Never re-read what you just read or wrote.",
 ].join("\n");
 
-export function sessionStartOutput(): string {
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: GUIDANCE } });
+/** Same guidance for the main thread (SessionStart) and every subagent (SubagentStart): subagents
+ *  do not inherit the main session's context, and most of the work of long sessions happens there. */
+export function guidanceOutput(event: "SessionStart" | "SubagentStart" = "SessionStart"): string {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: GUIDANCE } });
 }

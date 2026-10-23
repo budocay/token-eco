@@ -90,6 +90,15 @@ test("read symbol C/TS: definition preferred over prototype, contiguous overload
   assert.match(k.text, /\[2-6\/6\]/);
 });
 
+test("guidance: injected for the main thread and for every subagent", async () => {
+  const { guidanceOutput } = await import("../src/guidance.ts");
+  for (const ev of ["SessionStart", "SubagentStart"] as const) {
+    const o = JSON.parse(guidanceOutput(ev)).hookSpecificOutput;
+    assert.equal(o.hookEventName, ev);
+    assert.match(o.additionalContext, /^token-eco:/);
+  }
+});
+
 test("read symbol TS: homonym const + type joined (adjacent merged, distant as segment)", async () => {
   await writeFile(join(dir, "h.ts"), "export const U = z.object({\n  id: z.string(),\n});\n\nexport type U = z.infer<typeof U>;\n\nfunction use(u: U) {\n  return u;\n}\n\nexport interface U2 {}\nexport type V = 1;\nconst x = 0;\nexport const V = 2;\n");
   const u = await readSymbol({ file: "h.ts", name: "U" }, dir);

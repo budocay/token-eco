@@ -954,8 +954,8 @@ var GUIDANCE = [
   "- one Bash call chaining related commands (e.g. tests, then `git diff --stat`).",
   "Prefer these tools to Read/Grep/Glob/Edit and to cat/grep/sed in Bash. Never re-read what you just read or wrote."
 ].join("\n");
-function sessionStartOutput() {
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: GUIDANCE } });
+function guidanceOutput(event = "SessionStart") {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: GUIDANCE } });
 }
 
 // src/hook.ts
@@ -1141,8 +1141,8 @@ async function main() {
   for await (const chunk of process.stdin) raw += chunk;
   const e = JSON.parse(raw);
   const config = readConfig();
-  if (e.hook_event_name === "SessionStart") {
-    if (config.hook.mode !== "off") process.stdout.write(sessionStartOutput());
+  if (e.hook_event_name === "SessionStart" || e.hook_event_name === "SubagentStart") {
+    if (config.hook.mode !== "off") process.stdout.write(guidanceOutput(e.hook_event_name));
     return;
   }
   const runJs = join3(dirname(process.argv[1]), "run.js");
