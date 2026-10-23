@@ -29,7 +29,8 @@ function dataDir() {
   return d;
 }
 var DEFAULT_CONFIG = {
-  model: DEFAULT_MODEL,
+  model: "auto",
+  excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
   laterTurns: 10,
   port: 4777,
   hook: { mode: "redirect", lineThreshold: 300 }
@@ -42,14 +43,16 @@ function readConfig() {
   }
   try {
     const c = JSON.parse(readFileSync(f, "utf8"));
-    const old = "tarifs" in c || "seuilLignes" in (c.hook ?? {}) || "pricing" in c;
+    const old = "tarifs" in c || "seuilLignes" in (c.hook ?? {}) || "pricing" in c || !("excludeProjects" in c);
     const hook = { ...DEFAULT_CONFIG.hook, ...c.hook };
+    if (!("excludeProjects" in c) && c.model === DEFAULT_MODEL) c.model = "auto";
     if (hook.seuilLignes != null) {
       hook.lineThreshold = hook.seuilLignes;
       delete hook.seuilLignes;
     }
     const cfg = {
-      model: typeof c.model === "string" && PRICES[c.model] ? c.model : DEFAULT_MODEL,
+      model: typeof c.model === "string" && (PRICES[c.model] || c.model === "auto") ? c.model : DEFAULT_CONFIG.model,
+      excludeProjects: Array.isArray(c.excludeProjects) ? c.excludeProjects.filter((x) => typeof x === "string") : DEFAULT_CONFIG.excludeProjects,
       laterTurns: Number.isFinite(c.laterTurns) ? c.laterTurns : DEFAULT_CONFIG.laterTurns,
       port: Number.isFinite(c.port) ? c.port : DEFAULT_CONFIG.port,
       hook

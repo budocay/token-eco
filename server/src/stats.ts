@@ -1,10 +1,10 @@
 import {
   aggregate, aggregateScope, byDay, byDayAndKey, byKey, projects, recent, redirectStats, type Aggregate, type Scope,
 } from "./db.ts";
-import { readConfig, toDollars, type Config } from "./config.ts";
+import { effectiveModel, readConfig, toDollars, type Config } from "./config.ts";
 import { PRICES, PRICES_CHECKED, PRICES_SOURCE, savedTokenRate } from "./pricing.ts";
 import { CHARS_PER_TOKEN } from "./tokens.ts";
-import { compareSessions, listSessions, type SessionGroup } from "./sessions.ts";
+import { insights } from "./insights.ts";
 
 type WithDollars<T> = T & { dollars: number };
 
@@ -27,13 +27,13 @@ export interface StatsQuery extends Scope { model?: string }
 /** Everything the dashboard (web API) and the CLI need, optionally scoped to one project / N days. */
 export function statistics(q: StatsQuery = {}) {
   const cfg: Config = readConfig();
-  const model = q.model && PRICES[q.model] ? q.model : cfg.model;
+  const model = q.model && PRICES[q.model] ? q.model : effectiveModel(cfg);
   const $ = <T extends Aggregate>(a: T): WithDollars<T> => ({ ...a, dollars: toDollars(a.saved, cfg, model) });
   const scope: Scope = { project: q.project || undefined, days: q.days ?? null };
   return {
     estimate: `Estimates: 1 token ≈ ${CHARS_PER_TOKEN} characters; "native" = assumed size of the equivalent built-in tool's output.`,
     pricing: {
-      model, label: PRICES[model].label, laterTurns: cfg.laterTurns, rate: savedTokenRate(model, cfg.laterTurns),
+      model, label: PRICES[model].label + (cfg.model === "auto" && !q.model ? " (auto: your main model)" : ""), laterTurns: cfg.laterTurns, rate: savedTokenRate(model, cfg.laterTurns),
       checked: PRICES_CHECKED, source: PRICES_SOURCE,
       formula: `saved tokens × (5-min cache write + ${cfg.laterTurns} later turns × cache read) per MTok`,
       models: Object.entries(PRICES).map(([key, p]) => ({ key, ...p })),
@@ -62,14 +62,21 @@ export function summaryText(): string {
     `${name.padEnd(9)} ${formatTokens(a.saved).padStart(8)} tokens  ${formatUsd(a.dollars).padStart(9)}  (−${pct(a)}%, ${a.calls} call${a.calls === 1 ? "" : "s"})`;
   let real: string[] = [];
   try {
-    const { withEco: w, withoutEco: o } = compareSessions(listSessions({ days: 7 }));
-    const g = (name: string, x: SessionGroup) => x.sessions
-      ? `  ${name.padEnd(16)} ${String(x.sessions).padStart(3)} session(s)  ${formatTokens(x.tokensPerTurn).padStart(7)} tokens/turn  ${formatTokens(x.tokens / x.sessions).padStart(7)} tokens  ${formatUsd(x.costPerSession).padStart(7)} per session`
-      : `  ${name.padEnd(16)}   – no session`;
-    real = ["", "Real sessions, last 7 days (Claude Code logs, everything the model processed):",
-      g("With token-eco", w), g("Without", o), "  (different tasks: compare over many sessions, or bench/session-cost.ts on the same task)"];
+    const r = insights({ days: 30 });
+    const p = (x: number | null) => (x == null ? "–" : x > 0 && x < 0.001 ? "<0.1%" : `${+(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`);
+    const c = r.coverage, b = r.breakdown;
+    real = [
+      `Real sessions, last 30 days (${r.sessions.length} session(s), ${r.excluded} benchmark/temp hidden), ${formatUsd(b.cost)}:`,
+      `  Coverage   main thread ${p(c.mainPct)} (${c.main.eco} token-eco / ${c.main.native} built-in) · subagents ${p(c.subPct)} (${c.sub.eco} / ${c.sub.native})`,
+      `  Bash       ${p(c.bashPct)} compacted (${c.bash.compacted} of ${c.bash.total})`,
+      `  Avoided    ${formatUsd(r.avoided.usd)} = ${p(r.avoided.shareOfCost)} of the bill (est., each session's own model)`,
+      `  Cost       subagents ${p(b.cost ? b.costSub / b.cost : null)} · cache reads ${p(b.cost ? b.kinds.read / b.cost : null)} · cache writes ${p(b.cost ? b.kinds.write / b.cost : null)} · output ${p(b.cost ? b.kinds.output / b.cost : null)}`,
+      `  Compare    ${r.compare.verdict}`,
+      "",
+    ];
   } catch { /* logs unreadable: estimates only */ }
   return [
+    ...real,
     "token-eco — ESTIMATED tokens avoided per call (vs the assumed built-in call; extra turns not counted)",
     line("Today", s.today),
     line("7 days", s.week),
@@ -82,7 +89,6 @@ export function summaryText(): string {
     ...s.byProject.slice(0, 8).map((o) => `  ${(o.key.split(/[\\/]/).filter(Boolean).pop() ?? o.key).padEnd(16)} ${formatTokens(o.saved).padStart(8)} tokens  ${formatUsd(o.dollars).padStart(9)}`),
     "",
     (({ refused, fallbacks }) => `Hook (total): ${refused} built-in Read/Grep redirected, ${fallbacks} allowed on retry`)(s.redirections.total),
-    ...real,
     "",
     `Pricing: ${s.pricing.label}, $${s.pricing.rate.toFixed(2)}/MTok avoided (${s.pricing.formula}; prices checked ${s.pricing.checked}).`,
     `Change "model" / "laterTurns" in ~/.token-eco/config.json.`,

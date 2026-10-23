@@ -6939,8 +6939,8 @@ var require_formats = __commonJS({
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.formatNames = exports.fastFormats = exports.fullFormats = void 0;
-    function fmtDef(validate, compare) {
-      return { validate, compare };
+    function fmtDef(validate, compare2) {
+      return { validate, compare: compare2 };
     }
     exports.fullFormats = {
       // date: http://tools.ietf.org/html/rfc3339#section-5.6
@@ -22973,7 +22973,8 @@ function dataDir() {
   return d;
 }
 var DEFAULT_CONFIG = {
-  model: DEFAULT_MODEL,
+  model: "auto",
+  excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
   laterTurns: 10,
   port: 4777,
   hook: { mode: "redirect", lineThreshold: 300 }
@@ -22986,14 +22987,16 @@ function readConfig() {
   }
   try {
     const c = JSON.parse(readFileSync(f, "utf8"));
-    const old = "tarifs" in c || "seuilLignes" in (c.hook ?? {}) || "pricing" in c;
+    const old = "tarifs" in c || "seuilLignes" in (c.hook ?? {}) || "pricing" in c || !("excludeProjects" in c);
     const hook = { ...DEFAULT_CONFIG.hook, ...c.hook };
+    if (!("excludeProjects" in c) && c.model === DEFAULT_MODEL) c.model = "auto";
     if (hook.seuilLignes != null) {
       hook.lineThreshold = hook.seuilLignes;
       delete hook.seuilLignes;
     }
     const cfg = {
-      model: typeof c.model === "string" && PRICES[c.model] ? c.model : DEFAULT_MODEL,
+      model: typeof c.model === "string" && (PRICES[c.model] || c.model === "auto") ? c.model : DEFAULT_CONFIG.model,
+      excludeProjects: Array.isArray(c.excludeProjects) ? c.excludeProjects.filter((x) => typeof x === "string") : DEFAULT_CONFIG.excludeProjects,
       laterTurns: Number.isFinite(c.laterTurns) ? c.laterTurns : DEFAULT_CONFIG.laterTurns,
       port: Number.isFinite(c.port) ? c.port : DEFAULT_CONFIG.port,
       hook
@@ -23004,7 +23007,20 @@ function readConfig() {
     return DEFAULT_CONFIG;
   }
 }
-function toDollars(tokens, config2 = readConfig(), model = config2.model) {
+var AUTO_FILE = () => join2(dataDir(), "auto-model.json");
+function effectiveModel(config2 = readConfig()) {
+  if (config2.model !== "auto") return config2.model;
+  try {
+    const m = JSON.parse(readFileSync(AUTO_FILE(), "utf8")).model;
+    if (PRICES[m]) return m;
+  } catch {
+  }
+  return DEFAULT_MODEL;
+}
+function saveAutoModel(model) {
+  if (PRICES[model]) writeFileSync(AUTO_FILE(), JSON.stringify({ model, at: (/* @__PURE__ */ new Date()).toISOString() }) + "\n");
+}
+function toDollars(tokens, config2 = readConfig(), model = effectiveModel(config2)) {
   return tokens / 1e6 * savedTokenRate(model, config2.laterTurns);
 }
 
@@ -23104,6 +23120,9 @@ var PERIODS = {
   week: "date(ts, 'localtime') >= date('now', 'localtime', '-6 days')",
   total: "1 = 1"
 };
+function callsInWindow(project, from, to) {
+  return openDb().prepare(`SELECT tool, ${SUMS} FROM calls WHERE project = ? AND ts >= ? AND ts <= ? GROUP BY tool`).all(project, from, to);
+}
 function where(s = {}, extra = "1 = 1") {
   const parts = [extra], params = [];
   if (s.project) {
@@ -23168,9 +23187,9 @@ import { join as join4, resolve as resolve2 } from "node:path";
 var projectsDir = () => join4(process.env.CLAUDE_CONFIG_DIR ?? join4(homedir2(), ".claude"), "projects");
 var encodeProject = (dir) => resolve2(dir).replace(/[^a-zA-Z0-9]/g, "-");
 var ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
+var modelKey = (model) => model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2");
 function priceFor(model, forced) {
-  if (forced) return PRICES[forced];
-  return PRICES[model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2")];
+  return PRICES[forced ?? modelKey(model)];
 }
 function emptyTotals(id = "", project = "") {
   return {
@@ -23191,7 +23210,9 @@ function emptyTotals(id = "", project = "") {
     peakContext: 0,
     ecoCalls: 0,
     tools: {},
-    unpriced: []
+    unpriced: [],
+    costSub: 0,
+    costKind: { input: 0, write: 0, read: 0, output: 0 }
   };
 }
 function addLog(t, file, isSub, opts = {}) {
@@ -23211,11 +23232,11 @@ function addLog(t, file, isSub, opts = {}) {
     }
     const m = o.message;
     if (o.type !== "assistant" || !m) continue;
-    for (const c of Array.isArray(m.content) ? m.content : []) {
-      if (c?.type === "tool_use" && !seenTool.has(c.id)) {
-        seenTool.add(c.id);
-        if (ECO_TOOL.test(c.name)) t.ecoCalls++;
-        const key = (isSub ? "sub:" : "") + String(c.name).replace(ECO_TOOL, "eco:");
+    for (const c2 of Array.isArray(m.content) ? m.content : []) {
+      if (c2?.type === "tool_use" && !seenTool.has(c2.id)) {
+        seenTool.add(c2.id);
+        if (ECO_TOOL.test(c2.name)) t.ecoCalls++;
+        const key = (isSub ? "sub:" : "") + String(c2.name).replace(ECO_TOOL, "eco:");
         t.tools[key] = (t.tools[key] ?? 0) + 1;
       }
     }
@@ -23247,7 +23268,16 @@ function addLog(t, file, isSub, opts = {}) {
       if (!t.unpriced.includes(m.model)) t.unpriced.push(m.model);
       continue;
     }
-    t.cost += (inp * p.input + w5m * p.cacheWrite5m + w1h * 2 * p.input + read2 * p.cacheRead + out * p.output) / 1e6;
+    const k = {
+      input: inp * p.input / 1e6,
+      write: (w5m * p.cacheWrite5m + w1h * 2 * p.input) / 1e6,
+      read: read2 * p.cacheRead / 1e6,
+      output: out * p.output / 1e6
+    };
+    const c = k.input + k.write + k.read + k.output;
+    t.cost += c;
+    if (isSub) t.costSub += c;
+    for (const key of ["input", "write", "read", "output"]) t.costKind[key] += k[key];
   }
 }
 function subagentLogs(mainLog) {
@@ -23289,12 +23319,118 @@ function listSessions(scope = {}, root = projectsDir()) {
   }
   return out.sort((a, b) => b.end.localeCompare(a.end));
 }
-function compareSessions(list) {
-  const group = (l) => {
-    const turns = l.reduce((s, x) => s + x.turns + x.subagentTurns, 0), tokens = l.reduce((s, x) => s + x.tokens, 0), cost = l.reduce((s, x) => s + x.cost, 0);
-    return { sessions: l.length, turns, tokens, cost, tokensPerTurn: turns ? Math.round(tokens / turns) : 0, costPerSession: l.length ? cost / l.length : 0 };
+
+// src/insights.ts
+var ECO_FILE = ["eco:read", "eco:search", "eco:edit"];
+var NATIVE_FILE = ["Read", "Grep", "Glob", "Edit", "MultiEdit"];
+var isBench = (project, cfg) => cfg.excludeProjects.some((p) => p && project.includes(p));
+var shortName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+var pct = (c) => c.eco + c.native ? c.eco / (c.eco + c.native) : null;
+function median(a) {
+  if (!a.length) return 0;
+  const b = [...a].sort((x, y) => x - y), m = b.length >> 1;
+  return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2;
+}
+function sessionRow(s, cfg, calls = callsInWindow) {
+  const count = (prefix, names) => names.reduce((a, k) => a + (s.tools[prefix + k] ?? 0), 0);
+  const eco = calls(s.project, s.start, s.end);
+  const key = modelKey(s.model);
+  const rate = savedTokenRate(PRICES[key] ? key : "", cfg.laterTurns);
+  const saved = eco.reduce((a, c) => a + c.saved, 0);
+  const allTurns = s.turns + s.subagentTurns;
+  return {
+    id: s.id,
+    project: s.project,
+    name: shortName(s.project),
+    model: key,
+    start: s.start,
+    end: s.end,
+    turns: s.turns,
+    subagentTurns: s.subagentTurns,
+    cost: s.cost,
+    costSub: s.costSub,
+    costPerTurn: allTurns ? s.cost / allTurns : 0,
+    tokensPerTurn: allTurns ? Math.round(s.tokens / allTurns) : 0,
+    peakContext: s.peakContext,
+    main: { eco: count("", ECO_FILE), native: count("", NATIVE_FILE) },
+    sub: { eco: count("sub:", ECO_FILE), native: count("sub:", NATIVE_FILE) },
+    bash: { total: (s.tools.Bash ?? 0) + (s.tools["sub:Bash"] ?? 0), compacted: eco.find((c) => c.tool === "bash")?.calls ?? 0 },
+    avoidedTokens: saved,
+    avoidedUsd: saved / 1e6 * rate
   };
-  return { withEco: group(list.filter((s) => s.ecoCalls > 0)), withoutEco: group(list.filter((s) => s.ecoCalls === 0)) };
+}
+var usesEco = (r) => r.main.eco + r.sub.eco + r.bash.compacted > 0;
+function compare(rows) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const r of rows) {
+    const k = `${r.project}|${r.model}`;
+    if (!groups.has(k)) groups.set(k, { project: r.name, model: r.model, with: [], without: [] });
+    groups.get(k)[usesEco(r) ? "with" : "without"].push(r);
+  }
+  const stat2 = (l) => ({
+    sessions: l.length,
+    costPerTurn: median(l.map((r) => r.costPerTurn)),
+    tokensPerTurn: median(l.map((r) => r.tokensPerTurn)),
+    peakContext: median(l.map((r) => r.peakContext)),
+    costPerSession: median(l.map((r) => r.cost))
+  });
+  const matched = [...groups.values()].filter((g) => g.with.length && g.without.length);
+  const w = matched.flatMap((g) => g.with), o = matched.flatMap((g) => g.without);
+  const all = { with: stat2(w), without: stat2(o) };
+  const delta = all.without.costPerTurn ? all.with.costPerTurn / all.without.costPerTurn - 1 : null;
+  const verdict = w.length < 3 || o.length < 3 ? `Not enough comparable sessions (${w.length} with / ${o.length} without, same project and model; 3 of each needed).` : `Cost per turn ${delta <= 0 ? "\u2212" : "+"}${Math.abs(Math.round(delta * 100))}% with token-eco (median, ${w.length} vs ${o.length} sessions). Tasks still differ: a trend, not a proof.`;
+  return { verdict, delta, all, groups: matched.map((g) => ({ project: g.project, model: g.model, with: stat2(g.with), without: stat2(g.without) })) };
+}
+function breakdown(list) {
+  const sum = (f) => list.reduce((a, s) => a + f(s), 0);
+  const tools = {};
+  for (const s of list) for (const [k, n] of Object.entries(s.tools)) tools[k] = (tools[k] ?? 0) + n;
+  return {
+    cost: sum((s) => s.cost),
+    costSub: sum((s) => s.costSub),
+    kinds: { input: sum((s) => s.costKind.input), write: sum((s) => s.costKind.write), read: sum((s) => s.costKind.read), output: sum((s) => s.costKind.output) },
+    turns: sum((s) => s.turns),
+    subagentTurns: sum((s) => s.subagentTurns),
+    topTools: Object.entries(tools).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([tool, calls]) => ({ tool, calls }))
+  };
+}
+function dominantModel(list) {
+  const by = {};
+  for (const s of list) {
+    const k = modelKey(s.model);
+    if (PRICES[k]) by[k] = (by[k] ?? 0) + s.cost;
+  }
+  return Object.entries(by).sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+function insights(f = {}) {
+  const cfg = readConfig();
+  const days = f.days && f.days > 0 ? Math.min(f.days, 365) : 30;
+  const scanned = listSessions({ project: f.project, days }).filter((s) => s.turns >= 2);
+  const real = scanned.filter((s) => f.includeBench || !isBench(s.project, cfg));
+  const auto = dominantModel(real);
+  if (auto) try {
+    saveAutoModel(auto);
+  } catch {
+  }
+  const list = f.model ? real.filter((s) => modelKey(s.model) === f.model) : real;
+  const rows = list.map((s) => sessionRow(s, cfg));
+  const total = (pick2) => rows.reduce((a, r) => ({ eco: a.eco + pick2(r).eco, native: a.native + pick2(r).native }), { eco: 0, native: 0 });
+  const main = total((r) => r.main), sub = total((r) => r.sub);
+  const bash = rows.reduce((a, r) => ({ total: a.total + r.bash.total, compacted: a.compacted + r.bash.compacted }), { total: 0, compacted: 0 });
+  const avoidedUsd = rows.reduce((a, r) => a + r.avoidedUsd, 0), cost = rows.reduce((a, r) => a + r.cost, 0);
+  return {
+    filters: { project: f.project ?? "", model: f.model ?? "", days, includeBench: !!f.includeBench },
+    excluded: scanned.length - real.length,
+    excludePatterns: cfg.excludeProjects,
+    autoModel: auto ?? null,
+    projects: [...new Set(real.map((s) => s.project))].map((p) => ({ path: p, name: shortName(p) })),
+    models: [...new Set(real.map((s) => modelKey(s.model)))],
+    coverage: { main, sub, bash, mainPct: pct(main), subPct: pct(sub), bashPct: bash.total ? bash.compacted / bash.total : null },
+    avoided: { tokens: rows.reduce((a, r) => a + r.avoidedTokens, 0), usd: avoidedUsd, shareOfCost: cost ? avoidedUsd / cost : 0 },
+    breakdown: breakdown(list),
+    compare: compare(rows),
+    sessions: rows.slice(0, 40)
+  };
 }
 
 // src/stats.ts
@@ -23310,14 +23446,14 @@ function formatUsd(d) {
 }
 function statistics(q = {}) {
   const cfg = readConfig();
-  const model = q.model && PRICES[q.model] ? q.model : cfg.model;
+  const model = q.model && PRICES[q.model] ? q.model : effectiveModel(cfg);
   const $ = (a) => ({ ...a, dollars: toDollars(a.saved, cfg, model) });
   const scope = { project: q.project || void 0, days: q.days ?? null };
   return {
     estimate: `Estimates: 1 token \u2248 ${CHARS_PER_TOKEN} characters; "native" = assumed size of the equivalent built-in tool's output.`,
     pricing: {
       model,
-      label: PRICES[model].label,
+      label: PRICES[model].label + (cfg.model === "auto" && !q.model ? " (auto: your main model)" : ""),
       laterTurns: cfg.laterTurns,
       rate: savedTokenRate(model, cfg.laterTurns),
       checked: PRICES_CHECKED,
@@ -23339,37 +23475,40 @@ function statistics(q = {}) {
     redirections: { day: redirectStats("day"), week: redirectStats("week"), total: redirectStats("total") }
   };
 }
-var pct = (a) => a.native ? Math.round(a.saved / a.native * 100) : 0;
+var pct2 = (a) => a.native ? Math.round(a.saved / a.native * 100) : 0;
 function summaryText() {
   const s = statistics();
-  const line = (name, a) => `${name.padEnd(9)} ${formatTokens(a.saved).padStart(8)} tokens  ${formatUsd(a.dollars).padStart(9)}  (\u2212${pct(a)}%, ${a.calls} call${a.calls === 1 ? "" : "s"})`;
+  const line = (name, a) => `${name.padEnd(9)} ${formatTokens(a.saved).padStart(8)} tokens  ${formatUsd(a.dollars).padStart(9)}  (\u2212${pct2(a)}%, ${a.calls} call${a.calls === 1 ? "" : "s"})`;
   let real = [];
   try {
-    const { withEco: w, withoutEco: o } = compareSessions(listSessions({ days: 7 }));
-    const g = (name, x) => x.sessions ? `  ${name.padEnd(16)} ${String(x.sessions).padStart(3)} session(s)  ${formatTokens(x.tokensPerTurn).padStart(7)} tokens/turn  ${formatTokens(x.tokens / x.sessions).padStart(7)} tokens  ${formatUsd(x.costPerSession).padStart(7)} per session` : `  ${name.padEnd(16)}   \u2013 no session`;
+    const r = insights({ days: 30 });
+    const p = (x) => x == null ? "\u2013" : x > 0 && x < 1e-3 ? "<0.1%" : `${+(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
+    const c = r.coverage, b = r.breakdown;
     real = [
-      "",
-      "Real sessions, last 7 days (Claude Code logs, everything the model processed):",
-      g("With token-eco", w),
-      g("Without", o),
-      "  (different tasks: compare over many sessions, or bench/session-cost.ts on the same task)"
+      `Real sessions, last 30 days (${r.sessions.length} session(s), ${r.excluded} benchmark/temp hidden), ${formatUsd(b.cost)}:`,
+      `  Coverage   main thread ${p(c.mainPct)} (${c.main.eco} token-eco / ${c.main.native} built-in) \xB7 subagents ${p(c.subPct)} (${c.sub.eco} / ${c.sub.native})`,
+      `  Bash       ${p(c.bashPct)} compacted (${c.bash.compacted} of ${c.bash.total})`,
+      `  Avoided    ${formatUsd(r.avoided.usd)} = ${p(r.avoided.shareOfCost)} of the bill (est., each session's own model)`,
+      `  Cost       subagents ${p(b.cost ? b.costSub / b.cost : null)} \xB7 cache reads ${p(b.cost ? b.kinds.read / b.cost : null)} \xB7 cache writes ${p(b.cost ? b.kinds.write / b.cost : null)} \xB7 output ${p(b.cost ? b.kinds.output / b.cost : null)}`,
+      `  Compare    ${r.compare.verdict}`,
+      ""
     ];
   } catch {
   }
   return [
+    ...real,
     "token-eco \u2014 ESTIMATED tokens avoided per call (vs the assumed built-in call; extra turns not counted)",
     line("Today", s.today),
     line("7 days", s.week),
     line("Total", s.total),
     "",
     "By tool:",
-    ...s.byTool.map((o) => `  ${o.key.padEnd(16)} ${formatTokens(o.saved).padStart(8)} tokens  (\u2212${pct(o)}%, ${o.calls} call${o.calls === 1 ? "" : "s"})`),
+    ...s.byTool.map((o) => `  ${o.key.padEnd(16)} ${formatTokens(o.saved).padStart(8)} tokens  (\u2212${pct2(o)}%, ${o.calls} call${o.calls === 1 ? "" : "s"})`),
     "",
     "By project:",
     ...s.byProject.slice(0, 8).map((o) => `  ${(o.key.split(/[\\/]/).filter(Boolean).pop() ?? o.key).padEnd(16)} ${formatTokens(o.saved).padStart(8)} tokens  ${formatUsd(o.dollars).padStart(9)}`),
     "",
     (({ refused, fallbacks }) => `Hook (total): ${refused} built-in Read/Grep redirected, ${fallbacks} allowed on retry`)(s.redirections.total),
-    ...real,
     "",
     `Pricing: ${s.pricing.label}, $${s.pricing.rate.toFixed(2)}/MTok avoided (${s.pricing.formula}; prices checked ${s.pricing.checked}).`,
     `Change "model" / "laterTurns" in ~/.token-eco/config.json.`,

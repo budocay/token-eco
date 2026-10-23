@@ -320,6 +320,24 @@ test("sessions: real usage from Claude Code logs (dedup by message id, subagents
   const c = compareSessions(list);
   assert.equal(c.withEco.sessions, 1); assert.equal(c.withoutEco.sessions, 1);
   assert.equal(c.withEco.tokensPerTurn, Math.round(3 * 1160 / 3)); // 2 main + 1 subagent turn
+  assert.ok(Math.abs(s1.costSub - s1.cost / 3) < 1e-9); // 1 of 3 identical turns in a subagent
+  const k = s1.costKind;
+  assert.ok(Math.abs(k.input + k.write + k.read + k.output - s1.cost) < 1e-9);
+
+  // Insights: coverage per thread, Bash compacted + avoided from the calls in the session window, bench filter.
+  const { sessionRow, compare, isBench, median } = await import("../src/insights.ts");
+  const { DEFAULT_CONFIG } = await import("../src/config.ts");
+  const calls = () => [{ tool: "bash", calls: 1, returned: 0, native: 0, saved: 0 }, { tool: "read", calls: 1, returned: 100, native: 1100, saved: 1000 }];
+  const r1 = sessionRow(s1, DEFAULT_CONFIG, calls);
+  assert.deepEqual([r1.main, r1.sub, r1.bash], [{ eco: 1, native: 0 }, { eco: 0, native: 0 }, { total: 1, compacted: 1 }]);
+  assert.equal(r1.model, "claude-sonnet-5.5");
+  assert.ok(r1.avoidedUsd > 0);
+  const r2 = sessionRow(list[0], DEFAULT_CONFIG, () => []);
+  assert.deepEqual(r2.main, { eco: 0, native: 1 });
+  assert.match(compare([r1, r2]).verdict, /Not enough comparable sessions \(1 with \/ 1 without/);
+  assert.ok(isBench(proj, DEFAULT_CONFIG));
+  assert.ok(!isBench("/Users/me/dev/app", DEFAULT_CONFIG));
+  assert.equal(median([3, 1, 2, 10]), 2.5);
   await rm(root, { recursive: true, force: true });
 });
 

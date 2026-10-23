@@ -74,6 +74,11 @@ td{padding:8px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:h
 td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
 .tag{display:inline-flex;align-items:center;gap:6px}.tag i{width:7px;height:7px;border-radius:2px;background:var(--c,var(--faint))}
 .empty{color:var(--muted);font:12px var(--mono);padding:8px 0}
+.part{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;font-size:16px;margin:8px 0 0}
+.part>span:not(.controls){font:12px var(--mono);color:var(--muted);font-weight:400}
+.part .controls{margin-left:auto;display:flex;gap:10px;align-items:center}
+.chk{font:12px var(--mono);color:var(--muted);display:flex;gap:6px;align-items:center;cursor:pointer}
+.good{color:var(--acc)}.bad{color:#ff7a8a}
 @media (max-width:1000px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:820px){.app{grid-template-columns:minmax(0,1fr)}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
   .grid2{grid-template-columns:minmax(0,1fr)}main{padding:20px}}
@@ -103,16 +108,35 @@ td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
         <select id="model" title="Model used to price the saved tokens"></select>
       </div>
     </div>
+    <h2 class="part">Real sessions <span>Claude Code logs · everything the model processed, subagents included</span>
+      <span class="controls"><select id="realModel" title="Only sessions of this model"></select>
+        <label class="chk"><input type="checkbox" id="bench"> benchmarks / temp dirs</label></span></h2>
+    <p class="note" id="realScope"></p>
+    <section class="kpis">
+      <div class="card kpi main"><p class="label">Coverage · main thread</p><div class="v" id="cMain">–</div><div class="d" id="cMainSub"></div></div>
+      <div class="card kpi main"><p class="label">Coverage · subagents</p><div class="v" id="cSub">–</div><div class="d" id="cSubSub"></div></div>
+      <div class="card kpi"><p class="label">Bash output compacted</p><div class="v" id="cBash">–</div><div class="d" id="cBashSub"></div></div>
+      <div class="card kpi"><p class="label">Avoided vs real bill (est.)</p><div class="v" id="cAvoid">–</div><div class="d" id="cAvoidSub"></div></div>
+    </section>
+    <div class="grid2">
+      <section class="card"><h2>Where the money goes <span id="moneyInfo"></span></h2><div class="tiles" id="moneyTiles"></div>
+        <div class="rows" id="kinds" style="margin-top:14px"></div></section>
+      <section class="card"><h2>Most used tools <span>calls · sub: = inside subagents</span></h2><div class="rows" id="topTools"></div></section>
+    </div>
+    <section class="card"><h2>With vs without token-eco <span>same project and model only · medians per turn (subagent turns included)</span></h2>
+      <p id="verdict" style="font:13px var(--mono);margin:0 0 12px"></p><div id="groups"></div></section>
+    <section class="card"><h2>Sessions <span>coverage = token-eco share of file reads / searches / edits</span></h2><div id="realRecent"></div></section>
+    <p class="note">Coverage counts token-eco read/search/edit against built-in Read/Grep/Glob/Edit/MultiEdit. Bash compacted and
+      "avoided" come from the token-eco calls recorded in the same project during the session (no session id in that table:
+      parallel sessions of one project share them). "Avoided" is priced with each session's own model.</p>
+
+    <h2 class="part">Per-call estimates <span>what each token-eco call returned vs the assumed built-in call</span></h2>
     <section class="kpis">
       <div class="card kpi main"><p class="label">Avoided per call (est.)</p><div class="v" id="kDollars">–</div><div class="d" id="kDollarsSub"></div></div>
       <div class="card kpi"><p class="label">Tokens avoided (est.)</p><div class="v" id="kTokens">–</div><div class="d" id="kTokensSub"></div></div>
       <div class="card kpi"><p class="label">Reduction</p><div class="v" id="kPct">–</div><div class="d" id="kPctSub"></div></div>
       <div class="card kpi"><p class="label">Tool calls</p><div class="v" id="kCalls">–</div><div class="d" id="kCallsSub"></div></div>
     </section>
-    <section class="card"><h2>Real sessions <span>from the Claude Code logs · every token the model processed, extra turns included</span></h2>
-      <div class="tiles" id="realTiles"></div><div id="realRecent" style="margin-top:12px"></div>
-      <p class="note" style="margin:12px 0 0">"With token-eco" = sessions that called at least one token-eco tool. Sessions differ in their tasks:
-        compare averages over many similar sessions, or run the same task both ways (<code>server/bench/session-cost.ts</code>).</p></section>
     <section class="card"><h2><span style="color:var(--text);font-size:13px;font-weight:600" id="chartTitle">Tokens avoided per day (est.)</span><span id="chartInfo"></span></h2>
       <div id="chart"></div><div class="legend" id="legend"></div></section>
     <div class="grid2">
@@ -143,7 +167,8 @@ const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s <
   : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
 const PALETTE = ["#5fb8ff", "#5fe08a", "#ffb35c", "#d38bff", "#ff7a8a", "#f1d36b", "#5ce0d0", "#9aa3ff", "#ff9e6b", "#b7e05f"];
 const store = (k, v) => v === undefined ? localStorage.getItem(`te-${k}`) : localStorage.setItem(`te-${k}`, v);
-const state = { project: store("project") || "", days: Number(store("days") ?? 30), model: store("model") || "", q: "", hidden: new Set() };
+const state = { project: store("project") || "", days: Number(store("days") ?? 30), model: store("model") || "", q: "", hidden: new Set(),
+  realModel: store("realModel") || "", bench: store("bench") === "1" };
 let data = null, colors = new Map();
 const colorOf = (k) => colors.get(k) ?? "var(--faint)";
 
@@ -261,27 +286,73 @@ function render() {
   renderRecent();
 }
 
+const share = (x) => x == null ? "–" : x > 0 && x < 0.001 ? "<0.1%" : `${x < 0.1 && x > 0 ? (x * 100).toFixed(1) : Math.round(x * 100)}%`;
+const cov = (c) => c.eco + c.native ? share(c.eco / (c.eco + c.native)) : "–";
+const label = (m) => String(m).replace(/^claude-/, "");
+function rowsOf(el, list, empty) {
+  const max = Math.max(1e-9, ...list.map((a) => a.v));
+  el.innerHTML = list.length ? list.map((a) => `<div class="row"><div class="t"><b title="${esc(a.k)}">${esc(a.k)}</b><em>${a.txt}</em></div>
+    <div class="bar"><i style="width:${Math.max(2, a.v / max * 100)}%;${a.c ? `--c:${a.c}` : ""}"></i></div></div>`).join("")
+    : `<div class="empty">${empty}</div>`;
+}
 function renderSessions(s) {
-  const g = (x, name) => x.sessions
-    ? `<div><b>${tok(x.tokensPerTurn)}</b><small>${name}: tokens / turn · ${nf.format(x.sessions)} session(s) · ${tok(x.tokens / x.sessions)} tok and ${usd(x.costPerSession)} / session</small></div>`
-    : `<div><b>–</b><small>${name}: no session</small></div>`;
-  $("realTiles").innerHTML = g(s.withEco, "With token-eco") + g(s.withoutEco, "Without");
-  $("realRecent").innerHTML = s.recent.length ? `<table><colgroup><col style="width:120px"><col><col style="width:70px"><col style="width:90px"><col style="width:80px"><col style="width:80px"></colgroup>
-    <tr><th>When</th><th>Project</th><th class="n">Turns</th><th class="n">Tokens</th><th class="n">Cost</th><th class="n">eco calls</th></tr>
-    ${s.recent.slice(0, 10).map((x) => `<tr><td title="${esc(x.end)}">${esc(ago(x.end))}</td>
-      <td title="${esc(x.project)}">${esc(base(x.project))}</td><td class="n">${nf.format(x.turns)}</td>
-      <td class="n">${tok(x.tokens)}</td><td class="n">${usd(x.cost)}</td><td class="n">${nf.format(x.ecoCalls)}</td></tr>`).join("")}</table>`
+  const sel = $("realModel");
+  sel.innerHTML = `<option value="">All models</option>` + s.models.map((m) => `<option value="${esc(m)}">${esc(label(m))}</option>`).join("");
+  sel.value = s.filters.model;
+  $("bench").checked = s.filters.includeBench;
+  $("realScope").textContent = `${nf.format(s.sessions.length)} session(s) shown, last ${s.filters.days} days`
+    + (s.excluded ? ` · ${nf.format(s.excluded)} benchmark/temp session(s) hidden (excludeProjects in ~/.token-eco/config.json)` : "")
+    + (s.autoModel ? ` · main model: ${label(s.autoModel)}` : "");
+  const c = s.coverage;
+  $("cMain").textContent = share(c.mainPct);
+  $("cMainSub").textContent = `${nf.format(c.main.eco)} token-eco / ${nf.format(c.main.native)} built-in`;
+  $("cSub").textContent = share(c.subPct);
+  $("cSubSub").textContent = `${nf.format(c.sub.eco)} token-eco / ${nf.format(c.sub.native)} built-in`;
+  $("cBash").textContent = share(c.bashPct);
+  $("cBashSub").textContent = `${nf.format(c.bash.compacted)} of ${nf.format(c.bash.total)} Bash calls`;
+  $("cAvoid").textContent = usd(s.avoided.usd);
+  $("cAvoidSub").textContent = `${share(s.avoided.shareOfCost)} of ${usd(s.breakdown.cost)} · ${tok(s.avoided.tokens)} tokens`;
+
+  const b = s.breakdown;
+  $("moneyInfo").textContent = `${usd(b.cost)} over ${nf.format(b.turns + b.subagentTurns)} turns`;
+  $("moneyTiles").innerHTML = `<div><b>${share(b.cost ? b.costSub / b.cost : null)}</b><small>in subagents (${usd(b.costSub)}, ${nf.format(b.subagentTurns)} turns)</small></div>
+    <div><b>${share(b.cost ? (b.cost - b.costSub) / b.cost : null)}</b><small>main thread (${usd(b.cost - b.costSub)}, ${nf.format(b.turns)} turns)</small></div>`;
+  const K = [["read", "Cache reads (context re-read every turn)", "#5fb8ff"], ["write", "Cache writes (new context)", "#ffb35c"],
+    ["output", "Output (model writing)", "#d38bff"], ["input", "Uncached input", "#9aa3ff"]];
+  rowsOf($("kinds"), K.map(([k, n, col]) => ({ k: n, v: b.kinds[k], txt: `${usd(b.kinds[k])} · ${share(b.cost ? b.kinds[k] / b.cost : null)}`, c: col })), "");
+  rowsOf($("topTools"), b.topTools.map((t) => ({ k: t.tool, v: t.calls, txt: nf.format(t.calls),
+    c: /eco:/.test(t.tool) ? "var(--acc)" : /^(sub:)?(Read|Grep|Glob|Edit|MultiEdit)$/.test(t.tool) ? "#ff7a8a" : "" })), "No tool call.");
+
+  const cmp = s.compare;
+  $("verdict").innerHTML = `<span class="${cmp.delta == null ? "" : cmp.delta <= 0 ? "good" : "bad"}">${esc(cmp.verdict)}</span>`;
+  $("groups").innerHTML = cmp.groups.length ? `<table><tr><th>Project</th><th>Model</th><th class="n">Sessions</th><th class="n">$ / turn</th><th class="n">Tokens / turn</th><th class="n">Peak context</th><th class="n">$ / session</th></tr>
+    ${cmp.groups.flatMap((g) => [["with", g.with], ["without", g.without]].map(([w, x], i) => `<tr><td>${i ? "" : esc(g.project)}</td><td>${i ? "" : esc(label(g.model))}</td>
+      <td class="n">${w === "with" ? "with" : "without"} · ${x.sessions}</td><td class="n">${usd(x.costPerTurn)}</td><td class="n">${tok(x.tokensPerTurn)}</td>
+      <td class="n">${tok(x.peakContext)}</td><td class="n">${usd(x.costPerSession)}</td></tr>`)).join("")}</table>`
+    : `<div class="empty">No project has sessions both with and without token-eco on the same model yet.</div>`;
+
+  $("realRecent").innerHTML = s.sessions.length ? `<table><tr><th>When</th><th>Project</th><th>Model</th><th class="n">Turns (+sub)</th><th class="n">Cost</th>
+    <th class="n">$ / turn</th><th class="n">Peak ctx</th><th class="n">Cov. main</th><th class="n">Cov. sub</th><th class="n">Bash</th><th class="n">Avoided</th></tr>
+    ${s.sessions.slice(0, 25).map((x) => `<tr><td title="${esc(x.start)} → ${esc(x.end)}">${esc(ago(x.end))}</td>
+      <td title="${esc(x.project)}">${esc(x.name)}</td><td>${esc(label(x.model))}</td>
+      <td class="n">${nf.format(x.turns)}${x.subagentTurns ? ` +${nf.format(x.subagentTurns)}` : ""}</td><td class="n">${usd(x.cost)}</td>
+      <td class="n">${usd(x.costPerTurn)}</td><td class="n">${tok(x.peakContext)}</td><td class="n">${cov(x.main)}</td><td class="n">${cov(x.sub)}</td>
+      <td class="n">${x.bash.total ? `${nf.format(x.bash.compacted)}/${nf.format(x.bash.total)}` : "–"}</td>
+      <td class="n" title="${tok(x.avoidedTokens)} tokens">${x.avoidedUsd ? `${usd(x.avoidedUsd)} (${share(x.cost ? x.avoidedUsd / x.cost : 0)})` : "–"}</td></tr>`).join("")}</table>`
     : `<div class="empty">No Claude Code session log in this period.</div>`;
 }
 async function loadSessions(qs) {
   try { renderSessions(await (await fetch(`/api/sessions?${qs}`)).json()); } catch { /* the estimates still show */ }
 }
+$("realModel").onchange = (e) => { state.realModel = e.target.value; store("realModel", state.realModel); load(); };
+$("bench").onchange = (e) => { state.bench = e.target.checked; store("bench", state.bench ? "1" : ""); load(); };
 $("projects").onclick = (e) => { const b = e.target.closest("button"); if (b) pick(b.dataset.p); };
 
 async function load() {
   try {
     const qs = new URLSearchParams({ days: String(state.days), ...(state.project ? { project: state.project } : {}), ...(state.model ? { model: state.model } : {}) });
-    loadSessions(new URLSearchParams({ days: String(state.days), ...(state.project ? { project: state.project } : {}) }));
+    loadSessions(new URLSearchParams({ days: String(state.days || 365), ...(state.project ? { project: state.project } : {}),
+      ...(state.realModel ? { model: state.realModel } : {}), ...(state.bench ? { bench: "1" } : {}) }));
     data = await (await fetch(`/api/stats?${qs}`)).json();
     if (state.project && !data.projects.some((x) => x.key === state.project)) return pick("");
     $("updated").textContent = `updated ${new Date().toLocaleTimeString("en-US")}`;

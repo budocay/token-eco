@@ -15,20 +15,25 @@ export interface SessionTotals {
   turns: number; subagentTurns: number; input: number; write5m: number; write1h: number; cacheRead: number;
   output: number; tokens: number; cost: number; peakContext: number; ecoCalls: number;
   tools: Record<string, number>; unpriced: string[];
+  /** Cost split: subagents vs main thread, and by token kind (what drives the bill). */
+  costSub: number; costKind: { input: number; write: number; read: number; output: number };
 }
 
 export const projectsDir = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
 export const encodeProject = (dir: string) => resolve(dir).replace(/[^a-zA-Z0-9]/g, "-");
 const ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
 
+/** Log model id → PRICES key: claude-opus-5-5 → claude-opus-5.5 (date suffix dropped). */
+export const modelKey = (model: string) => model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2");
+
 export function priceFor(model: string, forced?: string): ModelPrice | undefined {
-  if (forced) return PRICES[forced];
-  return PRICES[model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2")];
+  return PRICES[forced ?? modelKey(model)];
 }
 
 export function emptyTotals(id = "", project = ""): SessionTotals {
   return { id, project, start: "", end: "", model: "", turns: 0, subagentTurns: 0, input: 0, write5m: 0, write1h: 0,
-    cacheRead: 0, output: 0, tokens: 0, cost: 0, peakContext: 0, ecoCalls: 0, tools: {}, unpriced: [] };
+    cacheRead: 0, output: 0, tokens: 0, cost: 0, peakContext: 0, ecoCalls: 0, tools: {}, unpriced: [],
+    costSub: 0, costKind: { input: 0, write: 0, read: 0, output: 0 } };
 }
 
 /** Adds one log file (main or subagent) to t. cold: the first main turn pays its prefix as a 1h cache write. */
@@ -63,7 +68,12 @@ export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { c
     if (isSub) t.subagentTurns++; else { t.turns++; t.peakContext = Math.max(t.peakContext, inp + w5m + w1h + read); t.model ||= m.model; }
     const p = priceFor(m.model, opts.model);
     if (!p) { if (!t.unpriced.includes(m.model)) t.unpriced.push(m.model); continue; }
-    t.cost += (inp * p.input + w5m * p.cacheWrite5m + w1h * 2 * p.input + read * p.cacheRead + out * p.output) / 1e6;
+    const k = { input: inp * p.input / 1e6, write: (w5m * p.cacheWrite5m + w1h * 2 * p.input) / 1e6,
+      read: read * p.cacheRead / 1e6, output: out * p.output / 1e6 };
+    const c = k.input + k.write + k.read + k.output;
+    t.cost += c;
+    if (isSub) t.costSub += c;
+    for (const key of ["input", "write", "read", "output"] as const) t.costKind[key] += k[key];
   }
 }
 

@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { statistics } from "./stats.ts";
-import { compareSessions, listSessions } from "./sessions.ts";
+import { insights } from "./insights.ts";
 
 /** Works from src/ (tests) and from dist/ (bundle): server/public/index.html. */
 const HTML = fileURLToPath(new URL("../public/index.html", import.meta.url));
@@ -35,13 +35,14 @@ export function startServer(port: number): Promise<Server> {
         });
         res.writeHead(200, { ...HEADERS, "Content-Type": "application/json" }).end(JSON.stringify(body));
       } else if (req.method === "GET" && url.pathname === "/api/sessions") {
-        // Real usage from the Claude Code logs ("All" is capped at 90 days to bound the scan).
+        // Real usage from the Claude Code logs ("All" is capped at 365 days to bound the scan).
         const days = Number(url.searchParams.get("days"));
-        const list = listSessions({
-          project: url.searchParams.get("project") ?? undefined,
-          days: Number.isInteger(days) && days > 0 && days <= 3650 ? days : 90,
+        const body = insights({
+          project: url.searchParams.get("project") || undefined,
+          model: url.searchParams.get("model") || undefined,
+          days: Number.isInteger(days) && days > 0 ? days : 90,
+          includeBench: url.searchParams.get("bench") === "1",
         });
-        const body = { ...compareSessions(list), recent: list.slice(0, 30).map(({ tools, unpriced, ...s }) => s) };
         res.writeHead(200, { ...HEADERS, "Content-Type": "application/json" }).end(JSON.stringify(body));
       } else if (req.method === "GET" && url.pathname === "/api/ping") {
         res.writeHead(200, HEADERS).end("token-eco");

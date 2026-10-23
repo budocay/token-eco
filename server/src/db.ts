@@ -112,6 +112,15 @@ const PERIODS = {
 
 export type Period = keyof typeof PERIODS;
 
+export interface ToolSums { tool: string; calls: number; returned: number; native: number; saved: number }
+
+/** token-eco calls of one Claude Code session: same project, inside its time window (the calls table has
+ *  no session id; concurrent sessions in the same project would share their calls). */
+export function callsInWindow(project: string, from: string, to: string): ToolSums[] {
+  return openDb().prepare(`SELECT tool, ${SUMS} FROM calls WHERE project = ? AND ts >= ? AND ts <= ? GROUP BY tool`)
+    .all(project, from, to) as unknown as ToolSums[];
+}
+
 /** WHERE clause + parameters for a scope. */
 function where(s: Scope = {}, extra = "1 = 1"): [string, (string | number)[]] {
   const parts = [extra], params: (string | number)[] = [];
