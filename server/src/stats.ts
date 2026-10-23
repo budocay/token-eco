@@ -72,6 +72,10 @@ export function summaryText(): string {
       `  Avoided    ${formatUsd(r.avoided.usd)} = ${p(r.avoided.shareOfCost)} of the bill (est., each session's own model)`,
       `  Cost       subagents ${p(b.cost ? b.costSub / b.cost : null)} · cache reads ${p(b.cost ? b.kinds.read / b.cost : null)} · cache writes ${p(b.cost ? b.kinds.write / b.cost : null)} · output ${p(b.cost ? b.kinds.output / b.cost : null)}`,
       `  Compare    ${r.compare.verdict}`,
+      "Levers (measured; setting in ~/.claude/settings.json \"env\"):",
+      `  Context above 300K (main)     ${formatUsd(r.levers.compaction.over300k).padStart(10)}  CLAUDE_CODE_AUTO_COMPACT_WINDOW = ${r.levers.compaction.setting ?? "not set (try 300k)"}`,
+      `  Subagents on ${r.levers.subagents.cheaperModel.replace("claude-", "")} would save ${formatUsd(r.levers.subagents.saving).padStart(6)}  CLAUDE_CODE_SUBAGENT_MODEL = ${r.levers.subagents.setting ?? "not set"}`,
+      `  Cache expired (${r.levers.rebuilds.count} rewrites)   ${formatUsd(r.levers.rebuilds.cost).padStart(10)}  cache TTL = ${r.levers.rebuilds.setting ?? "5m (try CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h)"}`,
       "",
     ];
   } catch { /* logs unreadable: estimates only */ }

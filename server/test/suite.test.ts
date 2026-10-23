@@ -338,6 +338,12 @@ test("sessions: real usage from Claude Code logs (dedup by message id, subagents
   assert.ok(isBench(proj, DEFAULT_CONFIG));
   assert.ok(!isBench("/Users/me/dev/app", DEFAULT_CONFIG));
   assert.equal(median([3, 1, 2, 10]), 2.5);
+  assert.equal(s1.levers.startMain, 1110); assert.deepEqual(s1.levers.startSubs, [1110]);
+  assert.equal(s1.levers.subByModel["claude-sonnet-5.5"].read, 1000);
+  const { levers } = await import("../src/insights.ts");
+  const lv = levers([s1], { CLAUDE_CODE_SUBAGENT_MODEL: "x" });
+  assert.equal(lv.subagents.setting, "x"); assert.equal(lv.rebuilds.setting, null);
+  assert.equal(lv.subagents.saving, 0); // already the cheaper model
   await rm(root, { recursive: true, force: true });
 });
 

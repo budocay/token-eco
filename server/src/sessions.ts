@@ -17,7 +17,25 @@ export interface SessionTotals {
   tools: Record<string, number>; unpriced: string[];
   /** Cost split: subagents vs main thread, and by token kind (what drives the bill). */
   costSub: number; costKind: { input: number; write: number; read: number; output: number };
+  levers: Levers;
 }
+
+/** Usage tokens of a set of turns, kept raw so they can be re-priced with another model. */
+export interface RawTokens { input: number; write5m: number; write1h: number; read: number; output: number }
+
+/** What the dashboard's "Levers" card needs (see insights.ts). */
+export interface Levers {
+  /** Main-thread cache-read cost of the context above 200K / 300K tokens (what an earlier compaction saves). */
+  over200k: number; over300k: number;
+  /** Cache rewrites (>60% of a >50K context) after more than 5 min without a model reply: count, cost. */
+  rebuilds: number; rebuildCost: number;
+  /** Subagent usage by model (PRICES key), to price the switch to a cheaper model. */
+  subByModel: Record<string, RawTokens>;
+  /** Context of the first turn: main thread, and each subagent. */
+  startMain: number; startSubs: number[];
+}
+
+export const REBUILD_GAP_MS = 5 * 60_000;
 
 export const projectsDir = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
 export const encodeProject = (dir: string) => resolve(dir).replace(/[^a-zA-Z0-9]/g, "-");
@@ -33,12 +51,14 @@ export function priceFor(model: string, forced?: string): ModelPrice | undefined
 export function emptyTotals(id = "", project = ""): SessionTotals {
   return { id, project, start: "", end: "", model: "", turns: 0, subagentTurns: 0, input: 0, write5m: 0, write1h: 0,
     cacheRead: 0, output: 0, tokens: 0, cost: 0, peakContext: 0, ecoCalls: 0, tools: {}, unpriced: [],
-    costSub: 0, costKind: { input: 0, write: 0, read: 0, output: 0 } };
+    costSub: 0, costKind: { input: 0, write: 0, read: 0, output: 0 },
+    levers: { over200k: 0, over300k: 0, rebuilds: 0, rebuildCost: 0, subByModel: {}, startMain: 0, startSubs: [] } };
 }
 
 /** Adds one log file (main or subagent) to t. cold: the first main turn pays its prefix as a 1h cache write. */
 export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { cold?: boolean; model?: string } = {}): void {
   const seenMsg = new Set<string>(), seenTool = new Set<string>();
+  let prevReply = 0;
   for (const line of readFileSync(file, "utf8").split("\n")) {
     if (!line.trim()) continue;
     let o: any;
@@ -65,9 +85,24 @@ export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { c
     if (opts.cold && !isSub && seenMsg.size === 1) { w1h += read; read = 0; }
     t.input += inp; t.write5m += w5m; t.write1h += w1h; t.cacheRead += read; t.output += out;
     t.tokens += inp + w5m + w1h + read + out;
-    if (isSub) t.subagentTurns++; else { t.turns++; t.peakContext = Math.max(t.peakContext, inp + w5m + w1h + read); t.model ||= m.model; }
+    const ctx = inp + w5m + w1h + read, lv = t.levers, ts = o.timestamp ? Date.parse(o.timestamp) : 0;
+    if (seenMsg.size === 1) { if (isSub) lv.startSubs.push(ctx); else lv.startMain = ctx; }
+    if (isSub) t.subagentTurns++; else { t.turns++; t.peakContext = Math.max(t.peakContext, ctx); t.model ||= m.model; }
+    const gap = prevReply && ts ? ts - prevReply : 0;
+    if (ts) prevReply = ts;
     const p = priceFor(m.model, opts.model);
     if (!p) { if (!t.unpriced.includes(m.model)) t.unpriced.push(m.model); continue; }
+    if (!isSub) {
+      lv.over200k += Math.max(0, Math.min(read, ctx - 200_000)) * p.cacheRead / 1e6;
+      lv.over300k += Math.max(0, Math.min(read, ctx - 300_000)) * p.cacheRead / 1e6;
+    } else {
+      const r = (lv.subByModel[modelKey(m.model)] ??= { input: 0, write5m: 0, write1h: 0, read: 0, output: 0 });
+      r.input += inp; r.write5m += w5m; r.write1h += w1h; r.read += read; r.output += out;
+    }
+    if (gap > REBUILD_GAP_MS && ctx > 50_000 && w5m + w1h > 0.6 * ctx) {
+      lv.rebuilds++;
+      lv.rebuildCost += (w5m * p.cacheWrite5m + w1h * 2 * p.input) / 1e6;
+    }
     const k = { input: inp * p.input / 1e6, write: (w5m * p.cacheWrite5m + w1h * 2 * p.input) / 1e6,
       read: read * p.cacheRead / 1e6, output: out * p.output / 1e6 };
     const c = k.input + k.write + k.read + k.output;

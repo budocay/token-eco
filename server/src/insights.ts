@@ -9,7 +9,10 @@
 import { readConfig, saveAutoModel, type Config } from "./config.ts";
 import { callsInWindow } from "./db.ts";
 import { PRICES, savedTokenRate } from "./pricing.ts";
-import { listSessions, modelKey, type SessionTotals } from "./sessions.ts";
+import { listSessions, modelKey, type RawTokens, type SessionTotals } from "./sessions.ts";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const ECO_FILE = ["eco:read", "eco:search", "eco:edit"];
 const NATIVE_FILE = ["Read", "Grep", "Glob", "Edit", "MultiEdit"];
@@ -98,6 +101,46 @@ export function dominantModel(list: SessionTotals[]): string | undefined {
   return Object.entries(by).sort((a, b) => b[1] - a[1])[0]?.[0];
 }
 
+/** Claude Code settings that drive the levers: process env, then ~/.claude/settings.json "env". */
+export function claudeEnv(home = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude")): Record<string, string> {
+  let env: Record<string, string> = {};
+  try { env = JSON.parse(readFileSync(join(home, "settings.json"), "utf8")).env ?? {}; } catch { /* no settings */ }
+  const keys = ["CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
+    "CLAUDE_CODE_PROMPT_CACHE_TTL", "ENABLE_PROMPT_CACHING_1H"];
+  return Object.fromEntries(keys.map((k) => [k, process.env[k] ?? env[k]]).filter(([, v]) => v));
+}
+
+const CHEAP_SUB = "claude-sonnet-5.5";
+const priceRaw = (r: RawTokens, key: string) => {
+  const p = PRICES[key];
+  return p ? (r.input * p.input + r.write5m * p.cacheWrite5m + r.write1h * 2 * p.input + r.read * p.cacheRead + r.output * p.output) / 1e6 : 0;
+};
+
+/** The big cost drivers measured in the logs, each with the Claude Code setting that acts on it. */
+export function levers(list: SessionTotals[], env = claudeEnv()) {
+  const sum = (f: (s: SessionTotals) => number) => list.reduce((a, s) => a + f(s), 0);
+  const subModels: Record<string, { turnsCost: number; cheaper: number }> = {};
+  for (const s of list) for (const [k, r] of Object.entries(s.levers.subByModel)) {
+    const cost = priceRaw(r, k), cheap = priceRaw(r, CHEAP_SUB);
+    subModels[k] ??= { turnsCost: 0, cheaper: 0 };
+    subModels[k].turnsCost += cost;
+    subModels[k].cheaper += Math.max(0, cost - cheap);
+  }
+  const startSubs = list.flatMap((s) => s.levers.startSubs);
+  return {
+    env,
+    compaction: { over200k: sum((s) => s.levers.over200k), over300k: sum((s) => s.levers.over300k),
+      peakMedian: median(list.map((s) => s.peakContext)), setting: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ?? null },
+    rebuilds: { count: sum((s) => s.levers.rebuilds), cost: sum((s) => s.levers.rebuildCost),
+      setting: env.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL ?? env.CLAUDE_CODE_PROMPT_CACHE_TTL ?? (env.ENABLE_PROMPT_CACHING_1H ? "1h" : null) },
+    subagents: { byModel: Object.entries(subModels).map(([model, v]) => ({ model, ...v })).sort((a, b) => b.turnsCost - a.turnsCost),
+      cheaperModel: CHEAP_SUB, saving: Object.values(subModels).reduce((a, v) => a + v.cheaper, 0), setting: env.CLAUDE_CODE_SUBAGENT_MODEL ?? null },
+    start: { main: median(list.map((s) => s.levers.startMain).filter(Boolean)), sub: median(startSubs), subagents: startSubs.length,
+      // Every turn re-reads the starting context: what 10K fewer tokens would save (at each turn's cache-read price ≈ total).
+      per10k: sum((s) => (s.turns + s.subagentTurns) * 10_000 * (PRICES[modelKey(s.model)]?.cacheRead ?? 0) / 1e6) },
+  };
+}
+
 /** Everything the "Real sessions" part of the dashboard shows. */
 export function insights(f: Filters = {}) {
   const cfg = readConfig();
@@ -121,6 +164,7 @@ export function insights(f: Filters = {}) {
     coverage: { main, sub, bash, mainPct: pct(main), subPct: pct(sub), bashPct: bash.total ? bash.compacted / bash.total : null },
     avoided: { tokens: rows.reduce((a, r) => a + r.avoidedTokens, 0), usd: avoidedUsd, shareOfCost: cost ? avoidedUsd / cost : 0 },
     breakdown: breakdown(list),
+    levers: levers(list),
     compare: compare(rows),
     sessions: rows.slice(0, 40),
   };

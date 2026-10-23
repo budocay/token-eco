@@ -23184,6 +23184,7 @@ function estimateTokens(input) {
 import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { join as join4, resolve as resolve2 } from "node:path";
+var REBUILD_GAP_MS = 5 * 6e4;
 var projectsDir = () => join4(process.env.CLAUDE_CONFIG_DIR ?? join4(homedir2(), ".claude"), "projects");
 var encodeProject = (dir) => resolve2(dir).replace(/[^a-zA-Z0-9]/g, "-");
 var ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
@@ -23212,11 +23213,13 @@ function emptyTotals(id = "", project = "") {
     tools: {},
     unpriced: [],
     costSub: 0,
-    costKind: { input: 0, write: 0, read: 0, output: 0 }
+    costKind: { input: 0, write: 0, read: 0, output: 0 },
+    levers: { over200k: 0, over300k: 0, rebuilds: 0, rebuildCost: 0, subByModel: {}, startMain: 0, startSubs: [] }
   };
 }
 function addLog(t, file, isSub, opts = {}) {
   const seenMsg = /* @__PURE__ */ new Set(), seenTool = /* @__PURE__ */ new Set();
+  let prevReply = 0;
   for (const line of readFileSync2(file, "utf8").split("\n")) {
     if (!line.trim()) continue;
     let o;
@@ -23257,16 +23260,38 @@ function addLog(t, file, isSub, opts = {}) {
     t.cacheRead += read2;
     t.output += out;
     t.tokens += inp + w5m + w1h + read2 + out;
+    const ctx = inp + w5m + w1h + read2, lv = t.levers, ts = o.timestamp ? Date.parse(o.timestamp) : 0;
+    if (seenMsg.size === 1) {
+      if (isSub) lv.startSubs.push(ctx);
+      else lv.startMain = ctx;
+    }
     if (isSub) t.subagentTurns++;
     else {
       t.turns++;
-      t.peakContext = Math.max(t.peakContext, inp + w5m + w1h + read2);
+      t.peakContext = Math.max(t.peakContext, ctx);
       t.model ||= m.model;
     }
+    const gap = prevReply && ts ? ts - prevReply : 0;
+    if (ts) prevReply = ts;
     const p = priceFor(m.model, opts.model);
     if (!p) {
       if (!t.unpriced.includes(m.model)) t.unpriced.push(m.model);
       continue;
+    }
+    if (!isSub) {
+      lv.over200k += Math.max(0, Math.min(read2, ctx - 2e5)) * p.cacheRead / 1e6;
+      lv.over300k += Math.max(0, Math.min(read2, ctx - 3e5)) * p.cacheRead / 1e6;
+    } else {
+      const r = lv.subByModel[modelKey(m.model)] ??= { input: 0, write5m: 0, write1h: 0, read: 0, output: 0 };
+      r.input += inp;
+      r.write5m += w5m;
+      r.write1h += w1h;
+      r.read += read2;
+      r.output += out;
+    }
+    if (gap > REBUILD_GAP_MS && ctx > 5e4 && w5m + w1h > 0.6 * ctx) {
+      lv.rebuilds++;
+      lv.rebuildCost += (w5m * p.cacheWrite5m + w1h * 2 * p.input) / 1e6;
     }
     const k = {
       input: inp * p.input / 1e6,
@@ -23321,6 +23346,9 @@ function listSessions(scope = {}, root = projectsDir()) {
 }
 
 // src/insights.ts
+import { readFileSync as readFileSync3 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { join as join5 } from "node:path";
 var ECO_FILE = ["eco:read", "eco:search", "eco:edit"];
 var NATIVE_FILE = ["Read", "Grep", "Glob", "Edit", "MultiEdit"];
 var isBench = (project, cfg) => cfg.excludeProjects.some((p) => p && project.includes(p));
@@ -23402,6 +23430,64 @@ function dominantModel(list) {
   }
   return Object.entries(by).sort((a, b) => b[1] - a[1])[0]?.[0];
 }
+function claudeEnv(home = process.env.CLAUDE_CONFIG_DIR ?? join5(homedir3(), ".claude")) {
+  let env = {};
+  try {
+    env = JSON.parse(readFileSync3(join5(home, "settings.json"), "utf8")).env ?? {};
+  } catch {
+  }
+  const keys = [
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
+    "CLAUDE_CODE_PROMPT_CACHE_TTL",
+    "ENABLE_PROMPT_CACHING_1H"
+  ];
+  return Object.fromEntries(keys.map((k) => [k, process.env[k] ?? env[k]]).filter(([, v]) => v));
+}
+var CHEAP_SUB = "claude-sonnet-5.5";
+var priceRaw = (r, key) => {
+  const p = PRICES[key];
+  return p ? (r.input * p.input + r.write5m * p.cacheWrite5m + r.write1h * 2 * p.input + r.read * p.cacheRead + r.output * p.output) / 1e6 : 0;
+};
+function levers(list, env = claudeEnv()) {
+  const sum = (f) => list.reduce((a, s) => a + f(s), 0);
+  const subModels = {};
+  for (const s of list) for (const [k, r] of Object.entries(s.levers.subByModel)) {
+    const cost = priceRaw(r, k), cheap = priceRaw(r, CHEAP_SUB);
+    subModels[k] ??= { turnsCost: 0, cheaper: 0 };
+    subModels[k].turnsCost += cost;
+    subModels[k].cheaper += Math.max(0, cost - cheap);
+  }
+  const startSubs = list.flatMap((s) => s.levers.startSubs);
+  return {
+    env,
+    compaction: {
+      over200k: sum((s) => s.levers.over200k),
+      over300k: sum((s) => s.levers.over300k),
+      peakMedian: median(list.map((s) => s.peakContext)),
+      setting: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ?? null
+    },
+    rebuilds: {
+      count: sum((s) => s.levers.rebuilds),
+      cost: sum((s) => s.levers.rebuildCost),
+      setting: env.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL ?? env.CLAUDE_CODE_PROMPT_CACHE_TTL ?? (env.ENABLE_PROMPT_CACHING_1H ? "1h" : null)
+    },
+    subagents: {
+      byModel: Object.entries(subModels).map(([model, v]) => ({ model, ...v })).sort((a, b) => b.turnsCost - a.turnsCost),
+      cheaperModel: CHEAP_SUB,
+      saving: Object.values(subModels).reduce((a, v) => a + v.cheaper, 0),
+      setting: env.CLAUDE_CODE_SUBAGENT_MODEL ?? null
+    },
+    start: {
+      main: median(list.map((s) => s.levers.startMain).filter(Boolean)),
+      sub: median(startSubs),
+      subagents: startSubs.length,
+      // Every turn re-reads the starting context: what 10K fewer tokens would save (at each turn's cache-read price ≈ total).
+      per10k: sum((s) => (s.turns + s.subagentTurns) * 1e4 * (PRICES[modelKey(s.model)]?.cacheRead ?? 0) / 1e6)
+    }
+  };
+}
 function insights(f = {}) {
   const cfg = readConfig();
   const days = f.days && f.days > 0 ? Math.min(f.days, 365) : 30;
@@ -23428,6 +23514,7 @@ function insights(f = {}) {
     coverage: { main, sub, bash, mainPct: pct(main), subPct: pct(sub), bashPct: bash.total ? bash.compacted / bash.total : null },
     avoided: { tokens: rows.reduce((a, r) => a + r.avoidedTokens, 0), usd: avoidedUsd, shareOfCost: cost ? avoidedUsd / cost : 0 },
     breakdown: breakdown(list),
+    levers: levers(list),
     compare: compare(rows),
     sessions: rows.slice(0, 40)
   };
@@ -23491,6 +23578,10 @@ function summaryText() {
       `  Avoided    ${formatUsd(r.avoided.usd)} = ${p(r.avoided.shareOfCost)} of the bill (est., each session's own model)`,
       `  Cost       subagents ${p(b.cost ? b.costSub / b.cost : null)} \xB7 cache reads ${p(b.cost ? b.kinds.read / b.cost : null)} \xB7 cache writes ${p(b.cost ? b.kinds.write / b.cost : null)} \xB7 output ${p(b.cost ? b.kinds.output / b.cost : null)}`,
       `  Compare    ${r.compare.verdict}`,
+      'Levers (measured; setting in ~/.claude/settings.json "env"):',
+      `  Context above 300K (main)     ${formatUsd(r.levers.compaction.over300k).padStart(10)}  CLAUDE_CODE_AUTO_COMPACT_WINDOW = ${r.levers.compaction.setting ?? "not set (try 300k)"}`,
+      `  Subagents on ${r.levers.subagents.cheaperModel.replace("claude-", "")} would save ${formatUsd(r.levers.subagents.saving).padStart(6)}  CLAUDE_CODE_SUBAGENT_MODEL = ${r.levers.subagents.setting ?? "not set"}`,
+      `  Cache expired (${r.levers.rebuilds.count} rewrites)   ${formatUsd(r.levers.rebuilds.cost).padStart(10)}  cache TTL = ${r.levers.rebuilds.setting ?? "5m (try CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h)"}`,
       ""
     ];
   } catch {

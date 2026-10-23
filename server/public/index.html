@@ -123,6 +123,8 @@ td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
         <div class="rows" id="kinds" style="margin-top:14px"></div></section>
       <section class="card"><h2>Most used tools <span>calls · sub: = inside subagents</span></h2><div class="rows" id="topTools"></div></section>
     </div>
+    <section class="card"><h2>Levers <span>biggest cost drivers in your logs, and the Claude Code setting (settings.json "env") that acts on each</span></h2>
+      <div id="levers"></div></section>
     <section class="card"><h2>With vs without token-eco <span>same project and model only · medians per turn (subagent turns included)</span></h2>
       <p id="verdict" style="font:13px var(--mono);margin:0 0 12px"></p><div id="groups"></div></section>
     <section class="card"><h2>Sessions <span>coverage = token-eco share of file reads / searches / edits</span></h2><div id="realRecent"></div></section>
@@ -322,6 +324,25 @@ function renderSessions(s) {
   rowsOf($("kinds"), K.map(([k, n, col]) => ({ k: n, v: b.kinds[k], txt: `${usd(b.kinds[k])} · ${share(b.cost ? b.kinds[k] / b.cost : null)}`, c: col })), "");
   rowsOf($("topTools"), b.topTools.map((t) => ({ k: t.tool, v: t.calls, txt: nf.format(t.calls),
     c: /eco:/.test(t.tool) ? "var(--acc)" : /^(sub:)?(Read|Grep|Glob|Edit|MultiEdit)$/.test(t.tool) ? "#ff7a8a" : "" })), "No tool call.");
+
+  const L = s.levers;
+  const set = (v, want) => v ? `<span class="good">set: ${esc(v)}</span>` : `<span class="bad">not set</span> → <code>${esc(want)}</code>`;
+  const lever = (title, cost, what, setting) => `<tr><td><b>${title}</b><br><small style="color:var(--muted)">${what}</small></td>
+    <td class="n" style="white-space:nowrap">${cost}</td><td style="white-space:nowrap">${setting}</td></tr>`;
+  $("levers").innerHTML = `<table><tr><th>Driver</th><th class="n">Measured</th><th>Setting</th></tr>
+    ${lever("Huge contexts (main thread)", `${usd(L.compaction.over300k)} above 300K<br><small>${usd(L.compaction.over200k)} above 200K</small>`,
+      `Every turn re-reads the whole context; median peak ${tok(L.compaction.peakMedian)}. Compacting earlier (or /clear between tasks) cuts it.`,
+      set(L.compaction.setting, "CLAUDE_CODE_AUTO_COMPACT_WINDOW=300k"))}
+    ${lever("Subagent model", `${usd(L.subagents.saving)} saved<br><small>with ${esc(label(L.subagents.cheaperModel))}</small>`,
+      L.subagents.byModel.filter((x) => x.turnsCost >= 1).map((x) => `${esc(label(x.model))} ${usd(x.turnsCost)}`).join(" · ") || "No subagent.",
+      set(L.subagents.setting, "CLAUDE_CODE_SUBAGENT_MODEL=claude-sonnet-5-5"))}
+    ${lever("Cache expired during long commands", `${usd(L.rebuilds.cost)}<br><small>${nf.format(L.rebuilds.count)} rewrites</small>`,
+      "Context rewritten after >5 min without a reply (tests, builds). A 1-hour cache avoids most of it, but its writes cost 2× input instead of 1.25×.",
+      set(L.rebuilds.setting, "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h"))}
+    ${lever("Starting context", `${usd(L.start.per10k)}<br><small>per 10K tokens less</small>`,
+      `System prompt, tools, skills, CLAUDE.md: ${tok(L.start.main)} (main), ${tok(L.start.sub)} per subagent (${nf.format(L.start.subagents)} started).`,
+      `<small>disable unused plugins / skills</small>`)}</table>
+    <p class="note" style="margin:10px 0 0">Measured over the sessions shown, before any change: once a setting is on, new sessions should make its figure shrink.</p>`;
 
   const cmp = s.compare;
   $("verdict").innerHTML = `<span class="${cmp.delta == null ? "" : cmp.delta <= 0 ? "good" : "bad"}">${esc(cmp.verdict)}</span>`;
