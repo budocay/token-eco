@@ -33,6 +33,15 @@ switch (cmd) {
     console.log(summaryText());
     break;
 
+  case "audit": {
+    const { auditText } = await import("./audit.ts");
+    const { insights } = await import("./insights.ts");
+    let measured: { main: number; sub: number } | undefined;
+    try { const s = insights({ days: 30 }).levers.start; measured = { main: s.main, sub: s.sub }; } catch { /* no logs */ }
+    console.log(auditText(measured));
+    break;
+  }
+
   case "statusline": {
     // Claude Code status line (stdin = session info, ignored): one short line.
     const { aggregate } = await import("./db.ts");

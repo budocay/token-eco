@@ -4,6 +4,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
@@ -2979,7 +2982,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve3.call(this, root, ref);
+      let _sch = resolve4.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3006,7 +3009,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve3(root, ref) {
+    function resolve4(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3870,7 +3873,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve3(baseURI, relativeURI, options) {
+    function resolve4(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -4261,7 +4264,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve3,
+      resolve: resolve4,
       resolveComponent,
       equal,
       serialize,
@@ -7250,6 +7253,758 @@ var require_dist = __commonJS({
   }
 });
 
+// src/pricing.ts
+function savedTokenRate(model, laterTurns) {
+  const p = PRICES[model] ?? PRICES[DEFAULT_MODEL];
+  return p.cacheWrite5m + Math.max(0, laterTurns) * p.cacheRead;
+}
+var PRICES_CHECKED, PRICES_SOURCE, PRICES, DEFAULT_MODEL;
+var init_pricing = __esm({
+  "src/pricing.ts"() {
+    "use strict";
+    PRICES_CHECKED = "2026-10-22";
+    PRICES_SOURCE = "https://docs.claude.com/en/docs/about-claude/pricing";
+    PRICES = {
+      "claude-fable-5.1": { label: "Claude Fable 5.1", input: 10, cacheWrite5m: 12.5, cacheRead: 0.25, output: 50 },
+      "claude-opus-5.5": { label: "Claude Opus 5.5", input: 4, cacheWrite5m: 5, cacheRead: 0.2, output: 20 },
+      "claude-opus-5": { label: "Claude Opus 5", input: 5, cacheWrite5m: 6.25, cacheRead: 0.5, output: 25 },
+      "claude-opus-4.8": { label: "Claude Opus 4.8", input: 5, cacheWrite5m: 6.25, cacheRead: 0.5, output: 25 },
+      "claude-sonnet-5.5": { label: "Claude Sonnet 5.5", input: 2, cacheWrite5m: 2.5, cacheRead: 0.1, output: 10 },
+      "claude-sonnet-5": { label: "Claude Sonnet 5", input: 2, cacheWrite5m: 2.5, cacheRead: 0.2, output: 10 },
+      "claude-sonnet-4.6": { label: "Claude Sonnet 4.6", input: 3, cacheWrite5m: 3.75, cacheRead: 0.3, output: 15 },
+      "claude-haiku-5.5": { label: "Claude Haiku 5.5 (\u2264100k prompt)", input: 0.1, cacheWrite5m: 0.125, cacheRead: 0.01, output: 0.5 },
+      "claude-haiku-4.5": { label: "Claude Haiku 4.5", input: 1, cacheWrite5m: 1.25, cacheRead: 0.1, output: 5 }
+    };
+    DEFAULT_MODEL = "claude-sonnet-5.5";
+  }
+});
+
+// src/config.ts
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join as join2 } from "node:path";
+function nodeBinary(execPath = process.execPath) {
+  return execPath && existsSync(execPath) ? execPath : "node";
+}
+function dataDir() {
+  const d = process.env.TOKEN_ECO_HOME ?? join2(homedir(), ".token-eco");
+  mkdirSync(d, { recursive: true });
+  return d;
+}
+function readConfig() {
+  const f = join2(dataDir(), "config.json");
+  if (!existsSync(f)) {
+    writeFileSync(f, JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n");
+    return DEFAULT_CONFIG;
+  }
+  try {
+    const c = JSON.parse(readFileSync(f, "utf8"));
+    const old = "tarifs" in c || "seuilLignes" in (c.hook ?? {}) || "pricing" in c || !("excludeProjects" in c);
+    const hook = { ...DEFAULT_CONFIG.hook, ...c.hook };
+    if (!("excludeProjects" in c) && c.model === DEFAULT_MODEL) c.model = "auto";
+    if (hook.seuilLignes != null) {
+      hook.lineThreshold = hook.seuilLignes;
+      delete hook.seuilLignes;
+    }
+    const cfg = {
+      model: typeof c.model === "string" && (PRICES[c.model] || c.model === "auto") ? c.model : DEFAULT_CONFIG.model,
+      excludeProjects: Array.isArray(c.excludeProjects) ? c.excludeProjects.filter((x) => typeof x === "string") : DEFAULT_CONFIG.excludeProjects,
+      laterTurns: Number.isFinite(c.laterTurns) ? c.laterTurns : DEFAULT_CONFIG.laterTurns,
+      port: Number.isFinite(c.port) ? c.port : DEFAULT_CONFIG.port,
+      hook
+    };
+    if (old) writeFileSync(f, JSON.stringify(cfg, null, 2) + "\n");
+    return cfg;
+  } catch {
+    return DEFAULT_CONFIG;
+  }
+}
+function effectiveModel(config2 = readConfig()) {
+  if (config2.model !== "auto") return config2.model;
+  try {
+    const m = JSON.parse(readFileSync(AUTO_FILE(), "utf8")).model;
+    if (PRICES[m]) return m;
+  } catch {
+  }
+  return DEFAULT_MODEL;
+}
+function saveAutoModel(model) {
+  if (PRICES[model]) writeFileSync(AUTO_FILE(), JSON.stringify({ model, at: (/* @__PURE__ */ new Date()).toISOString() }) + "\n");
+}
+function toDollars(tokens, config2 = readConfig(), model = effectiveModel(config2)) {
+  return tokens / 1e6 * savedTokenRate(model, config2.laterTurns);
+}
+var DEFAULT_CONFIG, AUTO_FILE;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    init_pricing();
+    DEFAULT_CONFIG = {
+      model: "auto",
+      excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
+      laterTurns: 10,
+      port: 4777,
+      hook: { mode: "redirect", lineThreshold: 300 }
+    };
+    AUTO_FILE = () => join2(dataDir(), "auto-model.json");
+  }
+});
+
+// src/db.ts
+import { DatabaseSync } from "node:sqlite";
+import { join as join3 } from "node:path";
+function migrate(d) {
+  const has = (t) => !!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
+  const cols = (t) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+  if (has("appels")) {
+    d.exec("ALTER TABLE appels RENAME TO calls");
+    const ren = [
+      ["projet", "project"],
+      ["outil", "tool"],
+      ["tokens_renvoyes", "returned_tokens"],
+      ["tokens_natif_estimes", "native_tokens_est"],
+      ["duree_ms", "duration_ms"]
+    ];
+    for (const [a, b] of ren) if (cols("calls").includes(a)) d.exec(`ALTER TABLE calls RENAME COLUMN ${a} TO ${b}`);
+    const keys = [
+      ["fichier", "file"],
+      ["fichiers", "files"],
+      ["motif", "pattern"],
+      ["nom", "name"],
+      ["debut", "start"],
+      ["fin", "end"],
+      ["langage", "language"],
+      ["resultats", "results"],
+      ["cibles", "targets"],
+      ["lues", "readCount"],
+      ["lignes", "lines"],
+      ["compte", "count"],
+      ["famille", "family"],
+      ["commande", "command"]
+    ];
+    for (const [a, b] of keys) d.exec(`UPDATE calls SET details = replace(details, '"${a}":', '"${b}":') WHERE details LIKE '%"${a}":%'`);
+    d.exec(`UPDATE calls SET details = replace(replace(replace(details, '"mode":"lignes"', '"mode":"lines"'),
+      '"mode":"fichiers"', '"mode":"files"'), '"mode":"compte"', '"mode":"count"') WHERE details LIKE '%"mode":%'`);
+  }
+  if (has("redirections") && cols("redirections").includes("issue")) {
+    for (const [a, b] of [["outil", "tool"], ["cible", "target"], ["issue", "outcome"]]) {
+      d.exec(`ALTER TABLE redirections RENAME COLUMN ${a} TO ${b}`);
+    }
+    d.exec("UPDATE redirections SET outcome = CASE outcome WHEN 'refus' THEN 'refused' WHEN 'repli' THEN 'fallback' ELSE outcome END");
+  }
+}
+function openDb(filePath = join3(dataDir(), "eco.db")) {
+  if (db) return db;
+  db = new DatabaseSync(filePath);
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 2000;");
+  migrate(db);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS calls (
+      id INTEGER PRIMARY KEY,
+      ts TEXT NOT NULL,
+      project TEXT NOT NULL,
+      tool TEXT NOT NULL,
+      returned_tokens INTEGER NOT NULL,
+      native_tokens_est INTEGER NOT NULL,
+      duration_ms INTEGER,
+      details TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ts ON calls(ts);
+    -- PreToolUse hook: native calls refused (redirected) or let through on the second attempt.
+    CREATE TABLE IF NOT EXISTS redirections (
+      id INTEGER PRIMARY KEY, ts TEXT NOT NULL, session TEXT, tool TEXT NOT NULL,
+      target TEXT, outcome TEXT NOT NULL -- 'refused' | 'fallback'
+    );
+    -- Older tool names (v0.1 French, v0.2 split tools) folded into the v0.3+ tools: continuous history.
+    UPDATE calls SET tool = CASE tool
+      WHEN 'apercu' THEN 'read' WHEN 'lire_symbole' THEN 'read' WHEN 'lire_plage' THEN 'read'
+      WHEN 'outline' THEN 'read' WHEN 'read_symbol' THEN 'read' WHEN 'read_range' THEN 'read'
+      WHEN 'chercher_compact' THEN 'search' WHEN 'search_compact' THEN 'search'
+      WHEN 'editer_groupe' THEN 'edit' WHEN 'batch_edit' THEN 'edit' ELSE tool END
+    WHERE tool IN ('apercu', 'lire_symbole', 'lire_plage', 'outline', 'read_symbol', 'read_range',
+                   'chercher_compact', 'search_compact', 'editer_groupe', 'batch_edit');
+  `);
+  return db;
+}
+function record2(a, when = /* @__PURE__ */ new Date()) {
+  openDb().prepare(`INSERT INTO calls (ts, project, tool, returned_tokens, native_tokens_est, duration_ms, details)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+    when.toISOString(),
+    a.project,
+    a.tool,
+    a.returnedTokens,
+    a.nativeTokens,
+    a.durationMs ?? null,
+    a.details ? JSON.stringify(a.details) : null
+  );
+}
+function callsInWindow(project, from, to) {
+  return openDb().prepare(`SELECT tool, ${SUMS} FROM calls WHERE project = ? AND ts >= ? AND ts <= ? GROUP BY tool`).all(project, from, to);
+}
+function where(s = {}, extra = "1 = 1") {
+  const parts = [extra], params = [];
+  if (s.project) {
+    parts.push("project = ?");
+    params.push(s.project);
+  }
+  if (s.days) {
+    parts.push("date(ts, 'localtime') >= date('now', 'localtime', ?)");
+    params.push(`-${s.days - 1} days`);
+  }
+  return [parts.join(" AND "), params];
+}
+function redirectStats(period) {
+  return openDb().prepare(`SELECT COALESCE(SUM(outcome = 'refused'), 0) AS refused, COALESCE(SUM(outcome = 'fallback'), 0) AS fallbacks
+    FROM redirections WHERE ${PERIODS[period]}`).get();
+}
+function aggregate(period, project) {
+  const [w, p] = where({ project }, PERIODS[period]);
+  return openDb().prepare(`SELECT ${SUMS} FROM calls WHERE ${w}`).get(...p);
+}
+function aggregateScope(s) {
+  const [w, p] = where(s);
+  return openDb().prepare(`SELECT ${SUMS} FROM calls WHERE ${w}`).get(...p);
+}
+function byDay(days = 30, project) {
+  const [w, p] = where({ project, days });
+  return openDb().prepare(`SELECT date(ts, 'localtime') AS day, ${SUMS} FROM calls WHERE ${w} GROUP BY day ORDER BY day`).all(...p);
+}
+function byDayAndKey(key, s) {
+  const [w, p] = where(s);
+  return openDb().prepare(`SELECT date(ts, 'localtime') AS day, ${key} AS key,
+      COALESCE(SUM(native_tokens_est - returned_tokens), 0) AS saved, COUNT(*) AS calls
+    FROM calls WHERE ${w} GROUP BY day, key ORDER BY day`).all(...p);
+}
+function byKey(key, s = {}) {
+  const [w, p] = where(s);
+  return openDb().prepare(`SELECT ${key} AS key, ${SUMS} FROM calls WHERE ${w} GROUP BY ${key} ORDER BY saved DESC`).all(...p);
+}
+function projects() {
+  return openDb().prepare(`SELECT project AS key, ${SUMS}, MIN(ts) AS first, MAX(ts) AS last,
+      (SELECT tool FROM calls c2 WHERE c2.project = calls.project GROUP BY tool ORDER BY COUNT(*) DESC LIMIT 1) AS topTool
+    FROM calls GROUP BY project ORDER BY last DESC`).all();
+}
+function recent(n = 20, s = {}) {
+  const [w, p] = where(s);
+  return openDb().prepare(`
+    SELECT ts, project, tool, returned_tokens AS returned, native_tokens_est AS native, duration_ms, details
+    FROM calls WHERE ${w} ORDER BY id DESC LIMIT ?`).all(...p, n);
+}
+var db, SUMS, PERIODS;
+var init_db = __esm({
+  "src/db.ts"() {
+    "use strict";
+    init_config();
+    db = null;
+    SUMS = `COUNT(*) AS calls,
+  COALESCE(SUM(returned_tokens), 0) AS returned,
+  COALESCE(SUM(native_tokens_est), 0) AS native,
+  COALESCE(SUM(native_tokens_est - returned_tokens), 0) AS saved`;
+    PERIODS = {
+      day: "date(ts, 'localtime') = date('now', 'localtime')",
+      week: "date(ts, 'localtime') >= date('now', 'localtime', '-6 days')",
+      total: "1 = 1"
+    };
+  }
+});
+
+// src/tokens.ts
+function estimateTokens(input) {
+  const chars = typeof input === "number" ? input : input.length;
+  return Math.ceil(Math.max(0, chars) / CHARS_PER_TOKEN);
+}
+var CHARS_PER_TOKEN;
+var init_tokens = __esm({
+  "src/tokens.ts"() {
+    "use strict";
+    CHARS_PER_TOKEN = 4;
+  }
+});
+
+// src/sessions.ts
+import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join4, resolve as resolve2 } from "node:path";
+function priceFor(model, forced) {
+  return PRICES[forced ?? modelKey(model)];
+}
+function emptyTotals(id = "", project = "") {
+  return {
+    id,
+    project,
+    start: "",
+    end: "",
+    model: "",
+    turns: 0,
+    subagentTurns: 0,
+    input: 0,
+    write5m: 0,
+    write1h: 0,
+    cacheRead: 0,
+    output: 0,
+    tokens: 0,
+    cost: 0,
+    peakContext: 0,
+    ecoCalls: 0,
+    tools: {},
+    unpriced: [],
+    costSub: 0,
+    costKind: { input: 0, write: 0, read: 0, output: 0 },
+    levers: { over200k: 0, over300k: 0, rebuilds: 0, rebuildCost: 0, subByModel: {}, startMain: 0, startSubs: [] }
+  };
+}
+function addLog(t, file, isSub, opts = {}) {
+  const seenMsg = /* @__PURE__ */ new Set(), seenTool = /* @__PURE__ */ new Set();
+  let prevReply = 0;
+  for (const line of readFileSync2(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let o;
+    try {
+      o = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isSub && o.cwd && !t.project) t.project = o.cwd;
+    if (o.timestamp) {
+      if (!t.start || o.timestamp < t.start) t.start = o.timestamp;
+      if (o.timestamp > t.end) t.end = o.timestamp;
+    }
+    const m = o.message;
+    if (o.type !== "assistant" || !m) continue;
+    for (const c2 of Array.isArray(m.content) ? m.content : []) {
+      if (c2?.type === "tool_use" && !seenTool.has(c2.id)) {
+        seenTool.add(c2.id);
+        if (ECO_TOOL.test(c2.name)) t.ecoCalls++;
+        const key = (isSub ? "sub:" : "") + String(c2.name).replace(ECO_TOOL, "eco:");
+        t.tools[key] = (t.tools[key] ?? 0) + 1;
+      }
+    }
+    const u = m.usage;
+    if (!u || !m.id || seenMsg.has(m.id) || m.model === "<synthetic>") continue;
+    seenMsg.add(m.id);
+    let w1h = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+    const w5m = u.cache_creation ? u.cache_creation.ephemeral_5m_input_tokens ?? 0 : u.cache_creation_input_tokens ?? 0;
+    const inp = u.input_tokens ?? 0, out = u.output_tokens ?? 0;
+    let read3 = u.cache_read_input_tokens ?? 0;
+    if (opts.cold && !isSub && seenMsg.size === 1) {
+      w1h += read3;
+      read3 = 0;
+    }
+    t.input += inp;
+    t.write5m += w5m;
+    t.write1h += w1h;
+    t.cacheRead += read3;
+    t.output += out;
+    t.tokens += inp + w5m + w1h + read3 + out;
+    const ctx = inp + w5m + w1h + read3, lv = t.levers, ts = o.timestamp ? Date.parse(o.timestamp) : 0;
+    if (seenMsg.size === 1) {
+      if (isSub) lv.startSubs.push(ctx);
+      else lv.startMain = ctx;
+    }
+    if (isSub) t.subagentTurns++;
+    else {
+      t.turns++;
+      t.peakContext = Math.max(t.peakContext, ctx);
+      t.model ||= m.model;
+    }
+    const gap = prevReply && ts ? ts - prevReply : 0;
+    if (ts) prevReply = ts;
+    const p = priceFor(m.model, opts.model);
+    if (!p) {
+      if (!t.unpriced.includes(m.model)) t.unpriced.push(m.model);
+      continue;
+    }
+    if (!isSub) {
+      lv.over200k += Math.max(0, Math.min(read3, ctx - 2e5)) * p.cacheRead / 1e6;
+      lv.over300k += Math.max(0, Math.min(read3, ctx - 3e5)) * p.cacheRead / 1e6;
+    } else {
+      const r = lv.subByModel[modelKey(m.model)] ??= { input: 0, write5m: 0, write1h: 0, read: 0, output: 0 };
+      r.input += inp;
+      r.write5m += w5m;
+      r.write1h += w1h;
+      r.read += read3;
+      r.output += out;
+    }
+    if (gap > REBUILD_GAP_MS && ctx > 5e4 && w5m + w1h > 0.6 * ctx) {
+      lv.rebuilds++;
+      lv.rebuildCost += (w5m * p.cacheWrite5m + w1h * 2 * p.input) / 1e6;
+    }
+    const k = {
+      input: inp * p.input / 1e6,
+      write: (w5m * p.cacheWrite5m + w1h * 2 * p.input) / 1e6,
+      read: read3 * p.cacheRead / 1e6,
+      output: out * p.output / 1e6
+    };
+    const c = k.input + k.write + k.read + k.output;
+    t.cost += c;
+    if (isSub) t.costSub += c;
+    for (const key of ["input", "write", "read", "output"]) t.costKind[key] += k[key];
+  }
+}
+function subagentLogs(mainLog) {
+  const d = join4(mainLog.replace(/\.jsonl$/, ""), "subagents");
+  return existsSync2(d) ? readdirSync(d).filter((f) => f.endsWith(".jsonl")).map((f) => join4(d, f)) : [];
+}
+function sessionTotals(mainLog, opts = {}) {
+  const t = emptyTotals(mainLog.split(/[\\/]/).pop().replace(/\.jsonl$/, ""));
+  addLog(t, mainLog, false, opts);
+  for (const f of subagentLogs(mainLog)) addLog(t, f, true, opts);
+  return t;
+}
+function listSessions(scope = {}, root = projectsDir()) {
+  if (!existsSync2(root)) return [];
+  const since = scope.days ? Date.now() - scope.days * 864e5 : 0;
+  const dirs = scope.project ? [encodeProject(scope.project)] : readdirSync(root);
+  const out = [];
+  for (const d of dirs) {
+    const dir = join4(root, d);
+    let files;
+    try {
+      files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      const path = join4(dir, f);
+      const st = statSync(path);
+      if (st.mtimeMs < since) continue;
+      const key = `${st.mtimeMs}|${st.size}`;
+      let hit = cache.get(path);
+      if (!hit || hit.key !== key) {
+        hit = { key, t: sessionTotals(path) };
+        cache.set(path, hit);
+      }
+      if (hit.t.turns && (!scope.project || resolve2(hit.t.project) === resolve2(scope.project))) out.push(hit.t);
+    }
+  }
+  return out.sort((a, b) => b.end.localeCompare(a.end));
+}
+var REBUILD_GAP_MS, projectsDir, encodeProject, ECO_TOOL, modelKey, cache;
+var init_sessions = __esm({
+  "src/sessions.ts"() {
+    "use strict";
+    init_pricing();
+    REBUILD_GAP_MS = 5 * 6e4;
+    projectsDir = () => join4(process.env.CLAUDE_CONFIG_DIR ?? join4(homedir2(), ".claude"), "projects");
+    encodeProject = (dir) => resolve2(dir).replace(/[^a-zA-Z0-9]/g, "-");
+    ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
+    modelKey = (model) => model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2");
+    cache = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/insights.ts
+var insights_exports = {};
+__export(insights_exports, {
+  breakdown: () => breakdown,
+  claudeEnv: () => claudeEnv,
+  compare: () => compare,
+  dominantModel: () => dominantModel,
+  insights: () => insights,
+  isBench: () => isBench,
+  levers: () => levers,
+  median: () => median,
+  sessionRow: () => sessionRow
+});
+import { readFileSync as readFileSync3 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { join as join5 } from "node:path";
+function median(a) {
+  if (!a.length) return 0;
+  const b = [...a].sort((x, y) => x - y), m = b.length >> 1;
+  return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2;
+}
+function sessionRow(s, cfg, calls = callsInWindow) {
+  const count = (prefix, names) => names.reduce((a, k) => a + (s.tools[prefix + k] ?? 0), 0);
+  const eco = calls(s.project, s.start, s.end);
+  const key = modelKey(s.model);
+  const rate = savedTokenRate(PRICES[key] ? key : "", cfg.laterTurns);
+  const saved = eco.reduce((a, c) => a + c.saved, 0);
+  const allTurns = s.turns + s.subagentTurns;
+  return {
+    id: s.id,
+    project: s.project,
+    name: shortName(s.project),
+    model: key,
+    start: s.start,
+    end: s.end,
+    turns: s.turns,
+    subagentTurns: s.subagentTurns,
+    cost: s.cost,
+    costSub: s.costSub,
+    costPerTurn: allTurns ? s.cost / allTurns : 0,
+    tokensPerTurn: allTurns ? Math.round(s.tokens / allTurns) : 0,
+    peakContext: s.peakContext,
+    main: { eco: count("", ECO_FILE), native: count("", NATIVE_FILE) },
+    sub: { eco: count("sub:", ECO_FILE), native: count("sub:", NATIVE_FILE) },
+    bash: { total: (s.tools.Bash ?? 0) + (s.tools["sub:Bash"] ?? 0), compacted: eco.find((c) => c.tool === "bash")?.calls ?? 0 },
+    avoidedTokens: saved,
+    avoidedUsd: saved / 1e6 * rate
+  };
+}
+function compare(rows) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const r of rows) {
+    const k = `${r.project}|${r.model}`;
+    if (!groups.has(k)) groups.set(k, { project: r.name, model: r.model, with: [], without: [] });
+    groups.get(k)[usesEco(r) ? "with" : "without"].push(r);
+  }
+  const stat2 = (l) => ({
+    sessions: l.length,
+    costPerTurn: median(l.map((r) => r.costPerTurn)),
+    tokensPerTurn: median(l.map((r) => r.tokensPerTurn)),
+    peakContext: median(l.map((r) => r.peakContext)),
+    costPerSession: median(l.map((r) => r.cost))
+  });
+  const matched = [...groups.values()].filter((g) => g.with.length && g.without.length);
+  const w = matched.flatMap((g) => g.with), o = matched.flatMap((g) => g.without);
+  const all = { with: stat2(w), without: stat2(o) };
+  const delta = all.without.costPerTurn ? all.with.costPerTurn / all.without.costPerTurn - 1 : null;
+  const verdict = w.length < 3 || o.length < 3 ? `Not enough comparable sessions (${w.length} with / ${o.length} without, same project and model; 3 of each needed).` : `Cost per turn ${delta <= 0 ? "\u2212" : "+"}${Math.abs(Math.round(delta * 100))}% with token-eco (median, ${w.length} vs ${o.length} sessions). Tasks still differ: a trend, not a proof.`;
+  return { verdict, delta, all, groups: matched.map((g) => ({ project: g.project, model: g.model, with: stat2(g.with), without: stat2(g.without) })) };
+}
+function breakdown(list) {
+  const sum = (f) => list.reduce((a, s) => a + f(s), 0);
+  const tools = {};
+  for (const s of list) for (const [k, n] of Object.entries(s.tools)) tools[k] = (tools[k] ?? 0) + n;
+  return {
+    cost: sum((s) => s.cost),
+    costSub: sum((s) => s.costSub),
+    kinds: { input: sum((s) => s.costKind.input), write: sum((s) => s.costKind.write), read: sum((s) => s.costKind.read), output: sum((s) => s.costKind.output) },
+    turns: sum((s) => s.turns),
+    subagentTurns: sum((s) => s.subagentTurns),
+    topTools: Object.entries(tools).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([tool, calls]) => ({ tool, calls }))
+  };
+}
+function dominantModel(list) {
+  const by = {};
+  for (const s of list) {
+    const k = modelKey(s.model);
+    if (PRICES[k]) by[k] = (by[k] ?? 0) + s.cost;
+  }
+  return Object.entries(by).sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+function claudeEnv(home = process.env.CLAUDE_CONFIG_DIR ?? join5(homedir3(), ".claude")) {
+  let env = {};
+  try {
+    env = JSON.parse(readFileSync3(join5(home, "settings.json"), "utf8")).env ?? {};
+  } catch {
+  }
+  const keys = [
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
+    "CLAUDE_CODE_PROMPT_CACHE_TTL",
+    "ENABLE_PROMPT_CACHING_1H"
+  ];
+  return Object.fromEntries(keys.map((k) => [k, process.env[k] ?? env[k]]).filter(([, v]) => v));
+}
+function levers(list, env = claudeEnv()) {
+  const sum = (f) => list.reduce((a, s) => a + f(s), 0);
+  const subModels = {};
+  for (const s of list) for (const [k, r] of Object.entries(s.levers.subByModel)) {
+    const cost = priceRaw(r, k), cheap = priceRaw(r, CHEAP_SUB);
+    subModels[k] ??= { turnsCost: 0, cheaper: 0 };
+    subModels[k].turnsCost += cost;
+    subModels[k].cheaper += Math.max(0, cost - cheap);
+  }
+  const startSubs = list.flatMap((s) => s.levers.startSubs);
+  return {
+    env,
+    compaction: {
+      over200k: sum((s) => s.levers.over200k),
+      over300k: sum((s) => s.levers.over300k),
+      peakMedian: median(list.map((s) => s.peakContext)),
+      setting: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ?? null
+    },
+    rebuilds: {
+      count: sum((s) => s.levers.rebuilds),
+      cost: sum((s) => s.levers.rebuildCost),
+      setting: env.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL ?? env.CLAUDE_CODE_PROMPT_CACHE_TTL ?? (env.ENABLE_PROMPT_CACHING_1H ? "1h" : null)
+    },
+    subagents: {
+      byModel: Object.entries(subModels).map(([model, v]) => ({ model, ...v })).sort((a, b) => b.turnsCost - a.turnsCost),
+      cheaperModel: CHEAP_SUB,
+      saving: Object.values(subModels).reduce((a, v) => a + v.cheaper, 0),
+      setting: env.CLAUDE_CODE_SUBAGENT_MODEL ?? null
+    },
+    start: {
+      main: median(list.map((s) => s.levers.startMain).filter(Boolean)),
+      sub: median(startSubs),
+      subagents: startSubs.length,
+      // Every turn re-reads the starting context: what 10K fewer tokens would save (at each turn's cache-read price ≈ total).
+      per10k: sum((s) => (s.turns + s.subagentTurns) * 1e4 * (PRICES[modelKey(s.model)]?.cacheRead ?? 0) / 1e6)
+    }
+  };
+}
+function insights(f = {}) {
+  const cfg = readConfig();
+  const days = f.days && f.days > 0 ? Math.min(f.days, 365) : 30;
+  const scanned = listSessions({ project: f.project, days }).filter((s) => s.turns >= 2);
+  const real = scanned.filter((s) => f.includeBench || !isBench(s.project, cfg));
+  const auto = dominantModel(real);
+  if (auto) try {
+    saveAutoModel(auto);
+  } catch {
+  }
+  const list = f.model ? real.filter((s) => modelKey(s.model) === f.model) : real;
+  const rows = list.map((s) => sessionRow(s, cfg));
+  const total = (pick2) => rows.reduce((a, r) => ({ eco: a.eco + pick2(r).eco, native: a.native + pick2(r).native }), { eco: 0, native: 0 });
+  const main = total((r) => r.main), sub = total((r) => r.sub);
+  const bash = rows.reduce((a, r) => ({ total: a.total + r.bash.total, compacted: a.compacted + r.bash.compacted }), { total: 0, compacted: 0 });
+  const avoidedUsd = rows.reduce((a, r) => a + r.avoidedUsd, 0), cost = rows.reduce((a, r) => a + r.cost, 0);
+  return {
+    filters: { project: f.project ?? "", model: f.model ?? "", days, includeBench: !!f.includeBench },
+    excluded: scanned.length - real.length,
+    excludePatterns: cfg.excludeProjects,
+    autoModel: auto ?? null,
+    projects: [...new Set(real.map((s) => s.project))].map((p) => ({ path: p, name: shortName(p) })),
+    models: [...new Set(real.map((s) => modelKey(s.model)))],
+    coverage: { main, sub, bash, mainPct: pct(main), subPct: pct(sub), bashPct: bash.total ? bash.compacted / bash.total : null },
+    avoided: { tokens: rows.reduce((a, r) => a + r.avoidedTokens, 0), usd: avoidedUsd, shareOfCost: cost ? avoidedUsd / cost : 0 },
+    breakdown: breakdown(list),
+    levers: levers(list),
+    compare: compare(rows),
+    sessions: rows.slice(0, 40)
+  };
+}
+var ECO_FILE, NATIVE_FILE, isBench, shortName, pct, usesEco, CHEAP_SUB, priceRaw;
+var init_insights = __esm({
+  "src/insights.ts"() {
+    "use strict";
+    init_config();
+    init_db();
+    init_pricing();
+    init_sessions();
+    ECO_FILE = ["eco:read", "eco:search", "eco:edit"];
+    NATIVE_FILE = ["Read", "Grep", "Glob", "Edit", "MultiEdit"];
+    isBench = (project, cfg) => cfg.excludeProjects.some((p) => p && project.includes(p));
+    shortName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+    pct = (c) => c.eco + c.native ? c.eco / (c.eco + c.native) : null;
+    usesEco = (r) => r.main.eco + r.sub.eco + r.bash.compacted > 0;
+    CHEAP_SUB = "claude-sonnet-5.5";
+    priceRaw = (r, key) => {
+      const p = PRICES[key];
+      return p ? (r.input * p.input + r.write5m * p.cacheWrite5m + r.write1h * 2 * p.input + r.read * p.cacheRead + r.output * p.output) / 1e6 : 0;
+    };
+  }
+});
+
+// src/audit.ts
+var audit_exports = {};
+__export(audit_exports, {
+  audit: () => audit,
+  auditText: () => auditText
+});
+import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync4 } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { dirname, join as join6, resolve as resolve3 } from "node:path";
+function claudeMd(file, seen = /* @__PURE__ */ new Set()) {
+  if (seen.has(file) || !existsSync3(file)) return 0;
+  seen.add(file);
+  const text2 = read2(file);
+  let n = estimateTokens(text2);
+  for (const m of text2.matchAll(/^@(\S+)/gm)) {
+    const p = m[1].startsWith("~/") ? join6(homedir4(), m[1].slice(2)) : resolve3(dirname(file), m[1]);
+    n += claudeMd(p, seen);
+  }
+  return n;
+}
+function components(root, source) {
+  const out = [];
+  const add = (kind, files) => {
+    const descs = files.map((f) => description(read2(f))).filter(Boolean);
+    if (descs.length) out.push({ source, kind, count: descs.length, tokens: estimateTokens(descs.join("\n")) });
+  };
+  const ls = (d) => {
+    try {
+      return readdirSync2(d);
+    } catch {
+      return [];
+    }
+  };
+  const skills = [];
+  const walk = (d, depth) => {
+    if (existsSync3(join6(d, "SKILL.md"))) {
+      skills.push(join6(d, "SKILL.md"));
+      return;
+    }
+    if (depth < 4) {
+      for (const s of ls(d)) if (s !== "node_modules" && !s.startsWith(".")) walk(join6(d, s), depth + 1);
+    }
+  };
+  for (const s of ls(join6(root, "skills"))) walk(join6(root, "skills", s), 1);
+  add("skills", skills);
+  add("agents", ls(join6(root, "agents")).filter((f) => f.endsWith(".md")).map((f) => join6(root, "agents", f)));
+  add("commands", ls(join6(root, "commands")).filter((f) => f.endsWith(".md")).map((f) => join6(root, "commands", f)));
+  const hooks = read2(join6(root, "hooks", "hooks.json"));
+  if (/"SessionStart"/.test(hooks)) out.push({ source, kind: "SessionStart hook", count: 1, tokens: 0, note: "injects text at startup (size known at run time)" });
+  const mcp = read2(join6(root, ".mcp.json"));
+  try {
+    const n = Object.keys(JSON.parse(mcp).mcpServers ?? JSON.parse(mcp)).length;
+    if (n) out.push({ source, kind: "MCP servers", count: n, tokens: 0, note: "tool schemas loaded (or deferred) at startup" });
+  } catch {
+  }
+  return out;
+}
+function audit(cwd = process.cwd(), home = process.env.CLAUDE_CONFIG_DIR ?? join6(homedir4(), ".claude")) {
+  const items = [];
+  const user = claudeMd(join6(home, "CLAUDE.md"));
+  if (user) items.push({ source: "~/.claude", kind: "CLAUDE.md", count: 1, tokens: user });
+  for (const f of [join6(cwd, "CLAUDE.md"), join6(cwd, ".claude", "CLAUDE.md"), join6(cwd, "CLAUDE.local.md")]) {
+    const n = claudeMd(f);
+    if (n) items.push({ source: "project", kind: f.slice(cwd.length + 1), count: 1, tokens: n });
+  }
+  items.push(...components(home, "~/.claude"));
+  let enabled = {};
+  try {
+    enabled = JSON.parse(read2(join6(home, "settings.json"))).enabledPlugins ?? {};
+  } catch {
+  }
+  let installed = {};
+  try {
+    installed = JSON.parse(read2(join6(home, "plugins", "installed_plugins.json"))).plugins ?? {};
+  } catch {
+  }
+  for (const [id, on] of Object.entries(enabled)) {
+    if (!on) continue;
+    const entry = installed[id]?.find((x) => x.scope === "user") ?? installed[id]?.[0];
+    if (entry && existsSync3(entry.installPath)) items.push(...components(entry.installPath, id.split("@")[0]));
+  }
+  return items.sort((a, b) => b.tokens - a.tokens);
+}
+function auditText(measured) {
+  const items = audit();
+  const total = items.reduce((a, i) => a + i.tokens, 0);
+  return [
+    "token-eco audit \u2014 what every session and subagent loads before your first message (re-read on every turn)",
+    ...items.map((i) => `  ${i.source.padEnd(22)} ${`${i.count} ${i.kind}`.padEnd(26)} ${i.tokens ? `~${i.tokens} tok` : ""}${i.note ? `  (${i.note})` : ""}`),
+    `  ${"".padEnd(22)} ${"listed total".padEnd(26)} ~${total} tok`,
+    measured ? `Measured starting context (median): ${measured.main} tok main thread, ${measured.sub} tok per subagent \u2014 the rest is Claude Code's own prompt and tool schemas.` : "",
+    "Disable plugins you do not use (claude plugin disable <name>) and keep CLAUDE.md short: each 10K tokens is re-read on every turn."
+  ].filter(Boolean).join("\n");
+}
+var read2, description;
+var init_audit = __esm({
+  "src/audit.ts"() {
+    "use strict";
+    init_tokens();
+    read2 = (f) => {
+      try {
+        return readFileSync4(f, "utf8");
+      } catch {
+        return "";
+      }
+    };
+    description = (md) => {
+      const fm = /^---\n([\s\S]*?)\n---/.exec(md)?.[1] ?? "";
+      const name = /^name:\s*(.*)$/m.exec(fm)?.[1] ?? "";
+      const desc = /^description:\s*([\s\S]*?)(?=^\w[\w-]*:|$(?![\s\S]))/m.exec(fm)?.[1] ?? "";
+      return `${name} ${desc}`.trim();
+    };
+  }
+});
+
 // node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -7885,12 +8640,12 @@ var handleResult = (ctx, result) => {
 function processCreateParams(params) {
   if (!params)
     return {};
-  const { errorMap: errorMap2, invalid_type_error, required_error, description } = params;
+  const { errorMap: errorMap2, invalid_type_error, required_error, description: description2 } = params;
   if (errorMap2 && (invalid_type_error || required_error)) {
     throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
   }
   if (errorMap2)
-    return { errorMap: errorMap2, description };
+    return { errorMap: errorMap2, description: description2 };
   const customMap = (iss, ctx) => {
     const { message } = params;
     if (iss.code === "invalid_enum_value") {
@@ -7903,7 +8658,7 @@ function processCreateParams(params) {
       return { message: ctx.defaultError };
     return { message: message ?? invalid_type_error ?? ctx.defaultError };
   };
-  return { errorMap: customMap, description };
+  return { errorMap: customMap, description: description2 };
 }
 var ZodType = class {
   get description() {
@@ -8168,11 +8923,11 @@ var ZodType = class {
       typeName: ZodFirstPartyTypeKind.ZodCatch
     });
   }
-  describe(description) {
+  describe(description2) {
     const This = this.constructor;
     return new This({
       ...this._def,
-      description
+      description: description2
     });
   }
   pipe(target) {
@@ -15428,9 +16183,9 @@ var ZodType2 = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
   inst.catch = (params) => _catch(inst, params);
   inst.pipe = (target) => pipe(inst, target);
   inst.readonly = () => readonly(inst);
-  inst.describe = (description) => {
+  inst.describe = (description2) => {
     const cl = inst.clone();
-    globalRegistry.add(cl, { description });
+    globalRegistry.add(cl, { description: description2 });
     return cl;
   };
   Object.defineProperty(inst, "description", {
@@ -19382,7 +20137,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
+        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -19399,7 +20154,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -19477,7 +20232,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve3(parseResult.data);
+            resolve4(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -19739,12 +20494,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve3, interval);
+      const timeoutId = setTimeout(resolve4, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -20875,7 +21630,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
+      await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -21164,10 +21919,10 @@ var McpServer = class {
     }
     return registeredResourceTemplate;
   }
-  _createRegisteredPrompt(name, title, description, argsSchema, callback) {
+  _createRegisteredPrompt(name, title, description2, argsSchema, callback) {
     const registeredPrompt = {
       title,
-      description,
+      description: description2,
       argsSchema: argsSchema === void 0 ? void 0 : objectFromShape(argsSchema),
       callback,
       enabled: true,
@@ -21205,11 +21960,11 @@ var McpServer = class {
     }
     return registeredPrompt;
   }
-  _createRegisteredTool(name, title, description, inputSchema, outputSchema, annotations, execution, _meta, handler) {
+  _createRegisteredTool(name, title, description2, inputSchema, outputSchema, annotations, execution, _meta, handler) {
     validateAndWarnToolName(name);
     const registeredTool = {
       title,
-      description,
+      description: description2,
       inputSchema: getZodSchemaObject(inputSchema),
       outputSchema: getZodSchemaObject(outputSchema),
       annotations,
@@ -21260,12 +22015,12 @@ var McpServer = class {
     if (this._registeredTools[name]) {
       throw new Error(`Tool ${name} is already registered`);
     }
-    let description;
+    let description2;
     let inputSchema;
     let outputSchema;
     let annotations;
     if (typeof rest[0] === "string") {
-      description = rest.shift();
+      description2 = rest.shift();
     }
     if (rest.length > 1) {
       const firstArg = rest[0];
@@ -21282,7 +22037,7 @@ var McpServer = class {
       }
     }
     const callback = rest[0];
-    return this._createRegisteredTool(name, void 0, description, inputSchema, outputSchema, annotations, { taskSupport: "forbidden" }, void 0, callback);
+    return this._createRegisteredTool(name, void 0, description2, inputSchema, outputSchema, annotations, { taskSupport: "forbidden" }, void 0, callback);
   }
   /**
    * Registers a tool with a config object and callback.
@@ -21291,23 +22046,23 @@ var McpServer = class {
     if (this._registeredTools[name]) {
       throw new Error(`Tool ${name} is already registered`);
     }
-    const { title, description, inputSchema, outputSchema, annotations, _meta } = config2;
-    return this._createRegisteredTool(name, title, description, inputSchema, outputSchema, annotations, { taskSupport: "forbidden" }, _meta, cb);
+    const { title, description: description2, inputSchema, outputSchema, annotations, _meta } = config2;
+    return this._createRegisteredTool(name, title, description2, inputSchema, outputSchema, annotations, { taskSupport: "forbidden" }, _meta, cb);
   }
   prompt(name, ...rest) {
     if (this._registeredPrompts[name]) {
       throw new Error(`Prompt ${name} is already registered`);
     }
-    let description;
+    let description2;
     if (typeof rest[0] === "string") {
-      description = rest.shift();
+      description2 = rest.shift();
     }
     let argsSchema;
     if (rest.length > 1) {
       argsSchema = rest.shift();
     }
     const cb = rest[0];
-    const registeredPrompt = this._createRegisteredPrompt(name, void 0, description, argsSchema, cb);
+    const registeredPrompt = this._createRegisteredPrompt(name, void 0, description2, argsSchema, cb);
     this.setPromptRequestHandlers();
     this.sendPromptListChanged();
     return registeredPrompt;
@@ -21319,8 +22074,8 @@ var McpServer = class {
     if (this._registeredPrompts[name]) {
       throw new Error(`Prompt ${name} is already registered`);
     }
-    const { title, description, argsSchema } = config2;
-    const registeredPrompt = this._createRegisteredPrompt(name, title, description, argsSchema, cb);
+    const { title, description: description2, argsSchema } = config2;
+    const registeredPrompt = this._createRegisteredPrompt(name, title, description2, argsSchema, cb);
     this.setPromptRequestHandlers();
     this.sendPromptListChanged();
     return registeredPrompt;
@@ -21406,11 +22161,11 @@ function promptArgumentsFromSchema(schema) {
   if (!shape)
     return [];
   return Object.entries(shape).map(([name, field]) => {
-    const description = getSchemaDescription(field);
+    const description2 = getSchemaDescription(field);
     const isOptional = isSchemaOptional(field);
     return {
       name,
-      description,
+      description: description2,
       required: !isOptional
     };
   });
@@ -21539,12 +22294,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve3) => {
+    return new Promise((resolve4) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve3();
+        resolve4();
       } else {
-        this._stdout.once("drain", resolve3);
+        this._stdout.once("drain", resolve4);
       }
     });
   }
@@ -22934,593 +23689,16 @@ ${lines.join("\n")}`,
   };
 }
 
-// src/db.ts
-import { DatabaseSync } from "node:sqlite";
-import { join as join3 } from "node:path";
-
-// src/config.ts
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join as join2 } from "node:path";
-
-// src/pricing.ts
-var PRICES_CHECKED = "2026-10-22";
-var PRICES_SOURCE = "https://docs.claude.com/en/docs/about-claude/pricing";
-var PRICES = {
-  "claude-fable-5.1": { label: "Claude Fable 5.1", input: 10, cacheWrite5m: 12.5, cacheRead: 0.25, output: 50 },
-  "claude-opus-5.5": { label: "Claude Opus 5.5", input: 4, cacheWrite5m: 5, cacheRead: 0.2, output: 20 },
-  "claude-opus-5": { label: "Claude Opus 5", input: 5, cacheWrite5m: 6.25, cacheRead: 0.5, output: 25 },
-  "claude-opus-4.8": { label: "Claude Opus 4.8", input: 5, cacheWrite5m: 6.25, cacheRead: 0.5, output: 25 },
-  "claude-sonnet-5.5": { label: "Claude Sonnet 5.5", input: 2, cacheWrite5m: 2.5, cacheRead: 0.1, output: 10 },
-  "claude-sonnet-5": { label: "Claude Sonnet 5", input: 2, cacheWrite5m: 2.5, cacheRead: 0.2, output: 10 },
-  "claude-sonnet-4.6": { label: "Claude Sonnet 4.6", input: 3, cacheWrite5m: 3.75, cacheRead: 0.3, output: 15 },
-  "claude-haiku-5.5": { label: "Claude Haiku 5.5 (\u2264100k prompt)", input: 0.1, cacheWrite5m: 0.125, cacheRead: 0.01, output: 0.5 },
-  "claude-haiku-4.5": { label: "Claude Haiku 4.5", input: 1, cacheWrite5m: 1.25, cacheRead: 0.1, output: 5 }
-};
-var DEFAULT_MODEL = "claude-sonnet-5.5";
-function savedTokenRate(model, laterTurns) {
-  const p = PRICES[model] ?? PRICES[DEFAULT_MODEL];
-  return p.cacheWrite5m + Math.max(0, laterTurns) * p.cacheRead;
-}
-
-// src/config.ts
-function nodeBinary(execPath = process.execPath) {
-  return execPath && existsSync(execPath) ? execPath : "node";
-}
-function dataDir() {
-  const d = process.env.TOKEN_ECO_HOME ?? join2(homedir(), ".token-eco");
-  mkdirSync(d, { recursive: true });
-  return d;
-}
-var DEFAULT_CONFIG = {
-  model: "auto",
-  excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
-  laterTurns: 10,
-  port: 4777,
-  hook: { mode: "redirect", lineThreshold: 300 }
-};
-function readConfig() {
-  const f = join2(dataDir(), "config.json");
-  if (!existsSync(f)) {
-    writeFileSync(f, JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n");
-    return DEFAULT_CONFIG;
-  }
-  try {
-    const c = JSON.parse(readFileSync(f, "utf8"));
-    const old = "tarifs" in c || "seuilLignes" in (c.hook ?? {}) || "pricing" in c || !("excludeProjects" in c);
-    const hook = { ...DEFAULT_CONFIG.hook, ...c.hook };
-    if (!("excludeProjects" in c) && c.model === DEFAULT_MODEL) c.model = "auto";
-    if (hook.seuilLignes != null) {
-      hook.lineThreshold = hook.seuilLignes;
-      delete hook.seuilLignes;
-    }
-    const cfg = {
-      model: typeof c.model === "string" && (PRICES[c.model] || c.model === "auto") ? c.model : DEFAULT_CONFIG.model,
-      excludeProjects: Array.isArray(c.excludeProjects) ? c.excludeProjects.filter((x) => typeof x === "string") : DEFAULT_CONFIG.excludeProjects,
-      laterTurns: Number.isFinite(c.laterTurns) ? c.laterTurns : DEFAULT_CONFIG.laterTurns,
-      port: Number.isFinite(c.port) ? c.port : DEFAULT_CONFIG.port,
-      hook
-    };
-    if (old) writeFileSync(f, JSON.stringify(cfg, null, 2) + "\n");
-    return cfg;
-  } catch {
-    return DEFAULT_CONFIG;
-  }
-}
-var AUTO_FILE = () => join2(dataDir(), "auto-model.json");
-function effectiveModel(config2 = readConfig()) {
-  if (config2.model !== "auto") return config2.model;
-  try {
-    const m = JSON.parse(readFileSync(AUTO_FILE(), "utf8")).model;
-    if (PRICES[m]) return m;
-  } catch {
-  }
-  return DEFAULT_MODEL;
-}
-function saveAutoModel(model) {
-  if (PRICES[model]) writeFileSync(AUTO_FILE(), JSON.stringify({ model, at: (/* @__PURE__ */ new Date()).toISOString() }) + "\n");
-}
-function toDollars(tokens, config2 = readConfig(), model = effectiveModel(config2)) {
-  return tokens / 1e6 * savedTokenRate(model, config2.laterTurns);
-}
-
-// src/db.ts
-var db = null;
-function migrate(d) {
-  const has = (t) => !!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
-  const cols = (t) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
-  if (has("appels")) {
-    d.exec("ALTER TABLE appels RENAME TO calls");
-    const ren = [
-      ["projet", "project"],
-      ["outil", "tool"],
-      ["tokens_renvoyes", "returned_tokens"],
-      ["tokens_natif_estimes", "native_tokens_est"],
-      ["duree_ms", "duration_ms"]
-    ];
-    for (const [a, b] of ren) if (cols("calls").includes(a)) d.exec(`ALTER TABLE calls RENAME COLUMN ${a} TO ${b}`);
-    const keys = [
-      ["fichier", "file"],
-      ["fichiers", "files"],
-      ["motif", "pattern"],
-      ["nom", "name"],
-      ["debut", "start"],
-      ["fin", "end"],
-      ["langage", "language"],
-      ["resultats", "results"],
-      ["cibles", "targets"],
-      ["lues", "readCount"],
-      ["lignes", "lines"],
-      ["compte", "count"],
-      ["famille", "family"],
-      ["commande", "command"]
-    ];
-    for (const [a, b] of keys) d.exec(`UPDATE calls SET details = replace(details, '"${a}":', '"${b}":') WHERE details LIKE '%"${a}":%'`);
-    d.exec(`UPDATE calls SET details = replace(replace(replace(details, '"mode":"lignes"', '"mode":"lines"'),
-      '"mode":"fichiers"', '"mode":"files"'), '"mode":"compte"', '"mode":"count"') WHERE details LIKE '%"mode":%'`);
-  }
-  if (has("redirections") && cols("redirections").includes("issue")) {
-    for (const [a, b] of [["outil", "tool"], ["cible", "target"], ["issue", "outcome"]]) {
-      d.exec(`ALTER TABLE redirections RENAME COLUMN ${a} TO ${b}`);
-    }
-    d.exec("UPDATE redirections SET outcome = CASE outcome WHEN 'refus' THEN 'refused' WHEN 'repli' THEN 'fallback' ELSE outcome END");
-  }
-}
-function openDb(filePath = join3(dataDir(), "eco.db")) {
-  if (db) return db;
-  db = new DatabaseSync(filePath);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 2000;");
-  migrate(db);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS calls (
-      id INTEGER PRIMARY KEY,
-      ts TEXT NOT NULL,
-      project TEXT NOT NULL,
-      tool TEXT NOT NULL,
-      returned_tokens INTEGER NOT NULL,
-      native_tokens_est INTEGER NOT NULL,
-      duration_ms INTEGER,
-      details TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_ts ON calls(ts);
-    -- PreToolUse hook: native calls refused (redirected) or let through on the second attempt.
-    CREATE TABLE IF NOT EXISTS redirections (
-      id INTEGER PRIMARY KEY, ts TEXT NOT NULL, session TEXT, tool TEXT NOT NULL,
-      target TEXT, outcome TEXT NOT NULL -- 'refused' | 'fallback'
-    );
-    -- Older tool names (v0.1 French, v0.2 split tools) folded into the v0.3+ tools: continuous history.
-    UPDATE calls SET tool = CASE tool
-      WHEN 'apercu' THEN 'read' WHEN 'lire_symbole' THEN 'read' WHEN 'lire_plage' THEN 'read'
-      WHEN 'outline' THEN 'read' WHEN 'read_symbol' THEN 'read' WHEN 'read_range' THEN 'read'
-      WHEN 'chercher_compact' THEN 'search' WHEN 'search_compact' THEN 'search'
-      WHEN 'editer_groupe' THEN 'edit' WHEN 'batch_edit' THEN 'edit' ELSE tool END
-    WHERE tool IN ('apercu', 'lire_symbole', 'lire_plage', 'outline', 'read_symbol', 'read_range',
-                   'chercher_compact', 'search_compact', 'editer_groupe', 'batch_edit');
-  `);
-  return db;
-}
-function record2(a, when = /* @__PURE__ */ new Date()) {
-  openDb().prepare(`INSERT INTO calls (ts, project, tool, returned_tokens, native_tokens_est, duration_ms, details)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
-    when.toISOString(),
-    a.project,
-    a.tool,
-    a.returnedTokens,
-    a.nativeTokens,
-    a.durationMs ?? null,
-    a.details ? JSON.stringify(a.details) : null
-  );
-}
-var SUMS = `COUNT(*) AS calls,
-  COALESCE(SUM(returned_tokens), 0) AS returned,
-  COALESCE(SUM(native_tokens_est), 0) AS native,
-  COALESCE(SUM(native_tokens_est - returned_tokens), 0) AS saved`;
-var PERIODS = {
-  day: "date(ts, 'localtime') = date('now', 'localtime')",
-  week: "date(ts, 'localtime') >= date('now', 'localtime', '-6 days')",
-  total: "1 = 1"
-};
-function callsInWindow(project, from, to) {
-  return openDb().prepare(`SELECT tool, ${SUMS} FROM calls WHERE project = ? AND ts >= ? AND ts <= ? GROUP BY tool`).all(project, from, to);
-}
-function where(s = {}, extra = "1 = 1") {
-  const parts = [extra], params = [];
-  if (s.project) {
-    parts.push("project = ?");
-    params.push(s.project);
-  }
-  if (s.days) {
-    parts.push("date(ts, 'localtime') >= date('now', 'localtime', ?)");
-    params.push(`-${s.days - 1} days`);
-  }
-  return [parts.join(" AND "), params];
-}
-function redirectStats(period) {
-  return openDb().prepare(`SELECT COALESCE(SUM(outcome = 'refused'), 0) AS refused, COALESCE(SUM(outcome = 'fallback'), 0) AS fallbacks
-    FROM redirections WHERE ${PERIODS[period]}`).get();
-}
-function aggregate(period, project) {
-  const [w, p] = where({ project }, PERIODS[period]);
-  return openDb().prepare(`SELECT ${SUMS} FROM calls WHERE ${w}`).get(...p);
-}
-function aggregateScope(s) {
-  const [w, p] = where(s);
-  return openDb().prepare(`SELECT ${SUMS} FROM calls WHERE ${w}`).get(...p);
-}
-function byDay(days = 30, project) {
-  const [w, p] = where({ project, days });
-  return openDb().prepare(`SELECT date(ts, 'localtime') AS day, ${SUMS} FROM calls WHERE ${w} GROUP BY day ORDER BY day`).all(...p);
-}
-function byDayAndKey(key, s) {
-  const [w, p] = where(s);
-  return openDb().prepare(`SELECT date(ts, 'localtime') AS day, ${key} AS key,
-      COALESCE(SUM(native_tokens_est - returned_tokens), 0) AS saved, COUNT(*) AS calls
-    FROM calls WHERE ${w} GROUP BY day, key ORDER BY day`).all(...p);
-}
-function byKey(key, s = {}) {
-  const [w, p] = where(s);
-  return openDb().prepare(`SELECT ${key} AS key, ${SUMS} FROM calls WHERE ${w} GROUP BY ${key} ORDER BY saved DESC`).all(...p);
-}
-function projects() {
-  return openDb().prepare(`SELECT project AS key, ${SUMS}, MIN(ts) AS first, MAX(ts) AS last,
-      (SELECT tool FROM calls c2 WHERE c2.project = calls.project GROUP BY tool ORDER BY COUNT(*) DESC LIMIT 1) AS topTool
-    FROM calls GROUP BY project ORDER BY last DESC`).all();
-}
-function recent(n = 20, s = {}) {
-  const [w, p] = where(s);
-  return openDb().prepare(`
-    SELECT ts, project, tool, returned_tokens AS returned, native_tokens_est AS native, duration_ms, details
-    FROM calls WHERE ${w} ORDER BY id DESC LIMIT ?`).all(...p, n);
-}
-
-// src/tokens.ts
-var CHARS_PER_TOKEN = 4;
-function estimateTokens(input) {
-  const chars = typeof input === "number" ? input : input.length;
-  return Math.ceil(Math.max(0, chars) / CHARS_PER_TOKEN);
-}
-
-// src/sessions.ts
-import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join4, resolve as resolve2 } from "node:path";
-var REBUILD_GAP_MS = 5 * 6e4;
-var projectsDir = () => join4(process.env.CLAUDE_CONFIG_DIR ?? join4(homedir2(), ".claude"), "projects");
-var encodeProject = (dir) => resolve2(dir).replace(/[^a-zA-Z0-9]/g, "-");
-var ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
-var modelKey = (model) => model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2");
-function priceFor(model, forced) {
-  return PRICES[forced ?? modelKey(model)];
-}
-function emptyTotals(id = "", project = "") {
-  return {
-    id,
-    project,
-    start: "",
-    end: "",
-    model: "",
-    turns: 0,
-    subagentTurns: 0,
-    input: 0,
-    write5m: 0,
-    write1h: 0,
-    cacheRead: 0,
-    output: 0,
-    tokens: 0,
-    cost: 0,
-    peakContext: 0,
-    ecoCalls: 0,
-    tools: {},
-    unpriced: [],
-    costSub: 0,
-    costKind: { input: 0, write: 0, read: 0, output: 0 },
-    levers: { over200k: 0, over300k: 0, rebuilds: 0, rebuildCost: 0, subByModel: {}, startMain: 0, startSubs: [] }
-  };
-}
-function addLog(t, file, isSub, opts = {}) {
-  const seenMsg = /* @__PURE__ */ new Set(), seenTool = /* @__PURE__ */ new Set();
-  let prevReply = 0;
-  for (const line of readFileSync2(file, "utf8").split("\n")) {
-    if (!line.trim()) continue;
-    let o;
-    try {
-      o = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!isSub && o.cwd && !t.project) t.project = o.cwd;
-    if (o.timestamp) {
-      if (!t.start || o.timestamp < t.start) t.start = o.timestamp;
-      if (o.timestamp > t.end) t.end = o.timestamp;
-    }
-    const m = o.message;
-    if (o.type !== "assistant" || !m) continue;
-    for (const c2 of Array.isArray(m.content) ? m.content : []) {
-      if (c2?.type === "tool_use" && !seenTool.has(c2.id)) {
-        seenTool.add(c2.id);
-        if (ECO_TOOL.test(c2.name)) t.ecoCalls++;
-        const key = (isSub ? "sub:" : "") + String(c2.name).replace(ECO_TOOL, "eco:");
-        t.tools[key] = (t.tools[key] ?? 0) + 1;
-      }
-    }
-    const u = m.usage;
-    if (!u || !m.id || seenMsg.has(m.id) || m.model === "<synthetic>") continue;
-    seenMsg.add(m.id);
-    let w1h = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
-    const w5m = u.cache_creation ? u.cache_creation.ephemeral_5m_input_tokens ?? 0 : u.cache_creation_input_tokens ?? 0;
-    const inp = u.input_tokens ?? 0, out = u.output_tokens ?? 0;
-    let read2 = u.cache_read_input_tokens ?? 0;
-    if (opts.cold && !isSub && seenMsg.size === 1) {
-      w1h += read2;
-      read2 = 0;
-    }
-    t.input += inp;
-    t.write5m += w5m;
-    t.write1h += w1h;
-    t.cacheRead += read2;
-    t.output += out;
-    t.tokens += inp + w5m + w1h + read2 + out;
-    const ctx = inp + w5m + w1h + read2, lv = t.levers, ts = o.timestamp ? Date.parse(o.timestamp) : 0;
-    if (seenMsg.size === 1) {
-      if (isSub) lv.startSubs.push(ctx);
-      else lv.startMain = ctx;
-    }
-    if (isSub) t.subagentTurns++;
-    else {
-      t.turns++;
-      t.peakContext = Math.max(t.peakContext, ctx);
-      t.model ||= m.model;
-    }
-    const gap = prevReply && ts ? ts - prevReply : 0;
-    if (ts) prevReply = ts;
-    const p = priceFor(m.model, opts.model);
-    if (!p) {
-      if (!t.unpriced.includes(m.model)) t.unpriced.push(m.model);
-      continue;
-    }
-    if (!isSub) {
-      lv.over200k += Math.max(0, Math.min(read2, ctx - 2e5)) * p.cacheRead / 1e6;
-      lv.over300k += Math.max(0, Math.min(read2, ctx - 3e5)) * p.cacheRead / 1e6;
-    } else {
-      const r = lv.subByModel[modelKey(m.model)] ??= { input: 0, write5m: 0, write1h: 0, read: 0, output: 0 };
-      r.input += inp;
-      r.write5m += w5m;
-      r.write1h += w1h;
-      r.read += read2;
-      r.output += out;
-    }
-    if (gap > REBUILD_GAP_MS && ctx > 5e4 && w5m + w1h > 0.6 * ctx) {
-      lv.rebuilds++;
-      lv.rebuildCost += (w5m * p.cacheWrite5m + w1h * 2 * p.input) / 1e6;
-    }
-    const k = {
-      input: inp * p.input / 1e6,
-      write: (w5m * p.cacheWrite5m + w1h * 2 * p.input) / 1e6,
-      read: read2 * p.cacheRead / 1e6,
-      output: out * p.output / 1e6
-    };
-    const c = k.input + k.write + k.read + k.output;
-    t.cost += c;
-    if (isSub) t.costSub += c;
-    for (const key of ["input", "write", "read", "output"]) t.costKind[key] += k[key];
-  }
-}
-function subagentLogs(mainLog) {
-  const d = join4(mainLog.replace(/\.jsonl$/, ""), "subagents");
-  return existsSync2(d) ? readdirSync(d).filter((f) => f.endsWith(".jsonl")).map((f) => join4(d, f)) : [];
-}
-function sessionTotals(mainLog, opts = {}) {
-  const t = emptyTotals(mainLog.split(/[\\/]/).pop().replace(/\.jsonl$/, ""));
-  addLog(t, mainLog, false, opts);
-  for (const f of subagentLogs(mainLog)) addLog(t, f, true, opts);
-  return t;
-}
-var cache = /* @__PURE__ */ new Map();
-function listSessions(scope = {}, root = projectsDir()) {
-  if (!existsSync2(root)) return [];
-  const since = scope.days ? Date.now() - scope.days * 864e5 : 0;
-  const dirs = scope.project ? [encodeProject(scope.project)] : readdirSync(root);
-  const out = [];
-  for (const d of dirs) {
-    const dir = join4(root, d);
-    let files;
-    try {
-      files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
-    } catch {
-      continue;
-    }
-    for (const f of files) {
-      const path = join4(dir, f);
-      const st = statSync(path);
-      if (st.mtimeMs < since) continue;
-      const key = `${st.mtimeMs}|${st.size}`;
-      let hit = cache.get(path);
-      if (!hit || hit.key !== key) {
-        hit = { key, t: sessionTotals(path) };
-        cache.set(path, hit);
-      }
-      if (hit.t.turns && (!scope.project || resolve2(hit.t.project) === resolve2(scope.project))) out.push(hit.t);
-    }
-  }
-  return out.sort((a, b) => b.end.localeCompare(a.end));
-}
-
-// src/insights.ts
-import { readFileSync as readFileSync3 } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { join as join5 } from "node:path";
-var ECO_FILE = ["eco:read", "eco:search", "eco:edit"];
-var NATIVE_FILE = ["Read", "Grep", "Glob", "Edit", "MultiEdit"];
-var isBench = (project, cfg) => cfg.excludeProjects.some((p) => p && project.includes(p));
-var shortName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
-var pct = (c) => c.eco + c.native ? c.eco / (c.eco + c.native) : null;
-function median(a) {
-  if (!a.length) return 0;
-  const b = [...a].sort((x, y) => x - y), m = b.length >> 1;
-  return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2;
-}
-function sessionRow(s, cfg, calls = callsInWindow) {
-  const count = (prefix, names) => names.reduce((a, k) => a + (s.tools[prefix + k] ?? 0), 0);
-  const eco = calls(s.project, s.start, s.end);
-  const key = modelKey(s.model);
-  const rate = savedTokenRate(PRICES[key] ? key : "", cfg.laterTurns);
-  const saved = eco.reduce((a, c) => a + c.saved, 0);
-  const allTurns = s.turns + s.subagentTurns;
-  return {
-    id: s.id,
-    project: s.project,
-    name: shortName(s.project),
-    model: key,
-    start: s.start,
-    end: s.end,
-    turns: s.turns,
-    subagentTurns: s.subagentTurns,
-    cost: s.cost,
-    costSub: s.costSub,
-    costPerTurn: allTurns ? s.cost / allTurns : 0,
-    tokensPerTurn: allTurns ? Math.round(s.tokens / allTurns) : 0,
-    peakContext: s.peakContext,
-    main: { eco: count("", ECO_FILE), native: count("", NATIVE_FILE) },
-    sub: { eco: count("sub:", ECO_FILE), native: count("sub:", NATIVE_FILE) },
-    bash: { total: (s.tools.Bash ?? 0) + (s.tools["sub:Bash"] ?? 0), compacted: eco.find((c) => c.tool === "bash")?.calls ?? 0 },
-    avoidedTokens: saved,
-    avoidedUsd: saved / 1e6 * rate
-  };
-}
-var usesEco = (r) => r.main.eco + r.sub.eco + r.bash.compacted > 0;
-function compare(rows) {
-  const groups = /* @__PURE__ */ new Map();
-  for (const r of rows) {
-    const k = `${r.project}|${r.model}`;
-    if (!groups.has(k)) groups.set(k, { project: r.name, model: r.model, with: [], without: [] });
-    groups.get(k)[usesEco(r) ? "with" : "without"].push(r);
-  }
-  const stat2 = (l) => ({
-    sessions: l.length,
-    costPerTurn: median(l.map((r) => r.costPerTurn)),
-    tokensPerTurn: median(l.map((r) => r.tokensPerTurn)),
-    peakContext: median(l.map((r) => r.peakContext)),
-    costPerSession: median(l.map((r) => r.cost))
-  });
-  const matched = [...groups.values()].filter((g) => g.with.length && g.without.length);
-  const w = matched.flatMap((g) => g.with), o = matched.flatMap((g) => g.without);
-  const all = { with: stat2(w), without: stat2(o) };
-  const delta = all.without.costPerTurn ? all.with.costPerTurn / all.without.costPerTurn - 1 : null;
-  const verdict = w.length < 3 || o.length < 3 ? `Not enough comparable sessions (${w.length} with / ${o.length} without, same project and model; 3 of each needed).` : `Cost per turn ${delta <= 0 ? "\u2212" : "+"}${Math.abs(Math.round(delta * 100))}% with token-eco (median, ${w.length} vs ${o.length} sessions). Tasks still differ: a trend, not a proof.`;
-  return { verdict, delta, all, groups: matched.map((g) => ({ project: g.project, model: g.model, with: stat2(g.with), without: stat2(g.without) })) };
-}
-function breakdown(list) {
-  const sum = (f) => list.reduce((a, s) => a + f(s), 0);
-  const tools = {};
-  for (const s of list) for (const [k, n] of Object.entries(s.tools)) tools[k] = (tools[k] ?? 0) + n;
-  return {
-    cost: sum((s) => s.cost),
-    costSub: sum((s) => s.costSub),
-    kinds: { input: sum((s) => s.costKind.input), write: sum((s) => s.costKind.write), read: sum((s) => s.costKind.read), output: sum((s) => s.costKind.output) },
-    turns: sum((s) => s.turns),
-    subagentTurns: sum((s) => s.subagentTurns),
-    topTools: Object.entries(tools).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([tool, calls]) => ({ tool, calls }))
-  };
-}
-function dominantModel(list) {
-  const by = {};
-  for (const s of list) {
-    const k = modelKey(s.model);
-    if (PRICES[k]) by[k] = (by[k] ?? 0) + s.cost;
-  }
-  return Object.entries(by).sort((a, b) => b[1] - a[1])[0]?.[0];
-}
-function claudeEnv(home = process.env.CLAUDE_CONFIG_DIR ?? join5(homedir3(), ".claude")) {
-  let env = {};
-  try {
-    env = JSON.parse(readFileSync3(join5(home, "settings.json"), "utf8")).env ?? {};
-  } catch {
-  }
-  const keys = [
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-    "CLAUDE_CODE_SUBAGENT_MODEL",
-    "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
-    "CLAUDE_CODE_PROMPT_CACHE_TTL",
-    "ENABLE_PROMPT_CACHING_1H"
-  ];
-  return Object.fromEntries(keys.map((k) => [k, process.env[k] ?? env[k]]).filter(([, v]) => v));
-}
-var CHEAP_SUB = "claude-sonnet-5.5";
-var priceRaw = (r, key) => {
-  const p = PRICES[key];
-  return p ? (r.input * p.input + r.write5m * p.cacheWrite5m + r.write1h * 2 * p.input + r.read * p.cacheRead + r.output * p.output) / 1e6 : 0;
-};
-function levers(list, env = claudeEnv()) {
-  const sum = (f) => list.reduce((a, s) => a + f(s), 0);
-  const subModels = {};
-  for (const s of list) for (const [k, r] of Object.entries(s.levers.subByModel)) {
-    const cost = priceRaw(r, k), cheap = priceRaw(r, CHEAP_SUB);
-    subModels[k] ??= { turnsCost: 0, cheaper: 0 };
-    subModels[k].turnsCost += cost;
-    subModels[k].cheaper += Math.max(0, cost - cheap);
-  }
-  const startSubs = list.flatMap((s) => s.levers.startSubs);
-  return {
-    env,
-    compaction: {
-      over200k: sum((s) => s.levers.over200k),
-      over300k: sum((s) => s.levers.over300k),
-      peakMedian: median(list.map((s) => s.peakContext)),
-      setting: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ?? null
-    },
-    rebuilds: {
-      count: sum((s) => s.levers.rebuilds),
-      cost: sum((s) => s.levers.rebuildCost),
-      setting: env.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL ?? env.CLAUDE_CODE_PROMPT_CACHE_TTL ?? (env.ENABLE_PROMPT_CACHING_1H ? "1h" : null)
-    },
-    subagents: {
-      byModel: Object.entries(subModels).map(([model, v]) => ({ model, ...v })).sort((a, b) => b.turnsCost - a.turnsCost),
-      cheaperModel: CHEAP_SUB,
-      saving: Object.values(subModels).reduce((a, v) => a + v.cheaper, 0),
-      setting: env.CLAUDE_CODE_SUBAGENT_MODEL ?? null
-    },
-    start: {
-      main: median(list.map((s) => s.levers.startMain).filter(Boolean)),
-      sub: median(startSubs),
-      subagents: startSubs.length,
-      // Every turn re-reads the starting context: what 10K fewer tokens would save (at each turn's cache-read price ≈ total).
-      per10k: sum((s) => (s.turns + s.subagentTurns) * 1e4 * (PRICES[modelKey(s.model)]?.cacheRead ?? 0) / 1e6)
-    }
-  };
-}
-function insights(f = {}) {
-  const cfg = readConfig();
-  const days = f.days && f.days > 0 ? Math.min(f.days, 365) : 30;
-  const scanned = listSessions({ project: f.project, days }).filter((s) => s.turns >= 2);
-  const real = scanned.filter((s) => f.includeBench || !isBench(s.project, cfg));
-  const auto = dominantModel(real);
-  if (auto) try {
-    saveAutoModel(auto);
-  } catch {
-  }
-  const list = f.model ? real.filter((s) => modelKey(s.model) === f.model) : real;
-  const rows = list.map((s) => sessionRow(s, cfg));
-  const total = (pick2) => rows.reduce((a, r) => ({ eco: a.eco + pick2(r).eco, native: a.native + pick2(r).native }), { eco: 0, native: 0 });
-  const main = total((r) => r.main), sub = total((r) => r.sub);
-  const bash = rows.reduce((a, r) => ({ total: a.total + r.bash.total, compacted: a.compacted + r.bash.compacted }), { total: 0, compacted: 0 });
-  const avoidedUsd = rows.reduce((a, r) => a + r.avoidedUsd, 0), cost = rows.reduce((a, r) => a + r.cost, 0);
-  return {
-    filters: { project: f.project ?? "", model: f.model ?? "", days, includeBench: !!f.includeBench },
-    excluded: scanned.length - real.length,
-    excludePatterns: cfg.excludeProjects,
-    autoModel: auto ?? null,
-    projects: [...new Set(real.map((s) => s.project))].map((p) => ({ path: p, name: shortName(p) })),
-    models: [...new Set(real.map((s) => modelKey(s.model)))],
-    coverage: { main, sub, bash, mainPct: pct(main), subPct: pct(sub), bashPct: bash.total ? bash.compacted / bash.total : null },
-    avoided: { tokens: rows.reduce((a, r) => a + r.avoidedTokens, 0), usd: avoidedUsd, shareOfCost: cost ? avoidedUsd / cost : 0 },
-    breakdown: breakdown(list),
-    levers: levers(list),
-    compare: compare(rows),
-    sessions: rows.slice(0, 40)
-  };
-}
+// src/index.ts
+init_db();
+init_tokens();
 
 // src/stats.ts
+init_db();
+init_config();
+init_pricing();
+init_tokens();
+init_insights();
 function formatTokens(n) {
   const a = Math.abs(n);
   if (a < 1e3) return String(Math.round(n));
@@ -23608,10 +23786,11 @@ function summaryText() {
 }
 
 // src/index.ts
+init_config();
 import { execFile } from "node:child_process";
 import { extname as extname2 } from "node:path";
 import { fileURLToPath } from "node:url";
-var server = new McpServer({ name: "token-eco", version: "0.6.0" });
+var server = new McpServer({ name: "token-eco", version: "0.6.1" });
 var ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 function adapter(name, tool) {
   return async (args) => {
@@ -23736,10 +23915,25 @@ var text = (t) => ({ content: [{ type: "text", text: t }] });
 server.registerTool(
   "eco_report",
   {
-    description: "token-eco savings summary (estimates); dashboard=true starts the local dashboard and returns its URL.",
-    inputSchema: { dashboard: external_exports.boolean().optional() }
+    description: "token-eco savings summary; dashboard=true starts the local dashboard and returns its URL; audit=true lists what fills the starting context.",
+    inputSchema: { dashboard: external_exports.boolean().optional(), audit: external_exports.boolean().optional() }
   },
   async (a) => {
+    if (a.audit) {
+      try {
+        const { auditText: auditText2 } = await Promise.resolve().then(() => (init_audit(), audit_exports));
+        const { insights: insights2 } = await Promise.resolve().then(() => (init_insights(), insights_exports));
+        let measured;
+        try {
+          const s = insights2({ days: 30 }).levers.start;
+          measured = { main: s.main, sub: s.sub };
+        } catch {
+        }
+        return text(auditText2(measured));
+      } catch (e) {
+        return { ...text(`eco_report: ${e.message}`), isError: true };
+      }
+    }
     if (!a.dashboard) {
       try {
         return text(summaryText());

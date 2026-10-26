@@ -296,34 +296,23 @@ var init_db = __esm({
   }
 });
 
-// src/cli.ts
-init_config();
-import { spawn } from "node:child_process";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
-
-// src/stats.ts
-init_db();
-init_config();
-init_pricing();
-
 // src/tokens.ts
-var CHARS_PER_TOKEN = 4;
-
-// src/insights.ts
-init_config();
-init_db();
-init_pricing();
+function estimateTokens(input) {
+  const chars = typeof input === "number" ? input : input.length;
+  return Math.ceil(Math.max(0, chars) / CHARS_PER_TOKEN);
+}
+var CHARS_PER_TOKEN;
+var init_tokens = __esm({
+  "src/tokens.ts"() {
+    "use strict";
+    CHARS_PER_TOKEN = 4;
+  }
+});
 
 // src/sessions.ts
-init_pricing();
 import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { join as join3, resolve } from "node:path";
-var REBUILD_GAP_MS = 5 * 6e4;
-var projectsDir = () => join3(process.env.CLAUDE_CONFIG_DIR ?? join3(homedir2(), ".claude"), "projects");
-var encodeProject = (dir) => resolve(dir).replace(/[^a-zA-Z0-9]/g, "-");
-var ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
-var modelKey = (model) => model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2");
 function priceFor(model, forced) {
   return PRICES[forced ?? modelKey(model)];
 }
@@ -384,18 +373,18 @@ function addLog(t, file, isSub, opts2 = {}) {
     let w1h = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
     const w5m = u.cache_creation ? u.cache_creation.ephemeral_5m_input_tokens ?? 0 : u.cache_creation_input_tokens ?? 0;
     const inp = u.input_tokens ?? 0, out = u.output_tokens ?? 0;
-    let read = u.cache_read_input_tokens ?? 0;
+    let read2 = u.cache_read_input_tokens ?? 0;
     if (opts2.cold && !isSub && seenMsg.size === 1) {
-      w1h += read;
-      read = 0;
+      w1h += read2;
+      read2 = 0;
     }
     t.input += inp;
     t.write5m += w5m;
     t.write1h += w1h;
-    t.cacheRead += read;
+    t.cacheRead += read2;
     t.output += out;
-    t.tokens += inp + w5m + w1h + read + out;
-    const ctx = inp + w5m + w1h + read, lv = t.levers, ts = o.timestamp ? Date.parse(o.timestamp) : 0;
+    t.tokens += inp + w5m + w1h + read2 + out;
+    const ctx = inp + w5m + w1h + read2, lv = t.levers, ts = o.timestamp ? Date.parse(o.timestamp) : 0;
     if (seenMsg.size === 1) {
       if (isSub) lv.startSubs.push(ctx);
       else lv.startMain = ctx;
@@ -414,14 +403,14 @@ function addLog(t, file, isSub, opts2 = {}) {
       continue;
     }
     if (!isSub) {
-      lv.over200k += Math.max(0, Math.min(read, ctx - 2e5)) * p.cacheRead / 1e6;
-      lv.over300k += Math.max(0, Math.min(read, ctx - 3e5)) * p.cacheRead / 1e6;
+      lv.over200k += Math.max(0, Math.min(read2, ctx - 2e5)) * p.cacheRead / 1e6;
+      lv.over300k += Math.max(0, Math.min(read2, ctx - 3e5)) * p.cacheRead / 1e6;
     } else {
       const r = lv.subByModel[modelKey(m.model)] ??= { input: 0, write5m: 0, write1h: 0, read: 0, output: 0 };
       r.input += inp;
       r.write5m += w5m;
       r.write1h += w1h;
-      r.read += read;
+      r.read += read2;
       r.output += out;
     }
     if (gap > REBUILD_GAP_MS && ctx > 5e4 && w5m + w1h > 0.6 * ctx) {
@@ -431,7 +420,7 @@ function addLog(t, file, isSub, opts2 = {}) {
     const k = {
       input: inp * p.input / 1e6,
       write: (w5m * p.cacheWrite5m + w1h * 2 * p.input) / 1e6,
-      read: read * p.cacheRead / 1e6,
+      read: read2 * p.cacheRead / 1e6,
       output: out * p.output / 1e6
     };
     const c = k.input + k.write + k.read + k.output;
@@ -450,7 +439,6 @@ function sessionTotals(mainLog, opts2 = {}) {
   for (const f of subagentLogs(mainLog)) addLog(t, f, true, opts2);
   return t;
 }
-var cache = /* @__PURE__ */ new Map();
 function listSessions(scope = {}, root = projectsDir()) {
   if (!existsSync2(root)) return [];
   const since = scope.days ? Date.now() - scope.days * 864e5 : 0;
@@ -479,16 +467,36 @@ function listSessions(scope = {}, root = projectsDir()) {
   }
   return out.sort((a, b) => b.end.localeCompare(a.end));
 }
+var REBUILD_GAP_MS, projectsDir, encodeProject, ECO_TOOL, modelKey, cache;
+var init_sessions = __esm({
+  "src/sessions.ts"() {
+    "use strict";
+    init_pricing();
+    REBUILD_GAP_MS = 5 * 6e4;
+    projectsDir = () => join3(process.env.CLAUDE_CONFIG_DIR ?? join3(homedir2(), ".claude"), "projects");
+    encodeProject = (dir) => resolve(dir).replace(/[^a-zA-Z0-9]/g, "-");
+    ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
+    modelKey = (model) => model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2");
+    cache = /* @__PURE__ */ new Map();
+  }
+});
 
 // src/insights.ts
+var insights_exports = {};
+__export(insights_exports, {
+  breakdown: () => breakdown,
+  claudeEnv: () => claudeEnv,
+  compare: () => compare,
+  dominantModel: () => dominantModel,
+  insights: () => insights,
+  isBench: () => isBench,
+  levers: () => levers,
+  median: () => median,
+  sessionRow: () => sessionRow
+});
 import { readFileSync as readFileSync3 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { join as join4 } from "node:path";
-var ECO_FILE = ["eco:read", "eco:search", "eco:edit"];
-var NATIVE_FILE = ["Read", "Grep", "Glob", "Edit", "MultiEdit"];
-var isBench = (project, cfg) => cfg.excludeProjects.some((p) => p && project.includes(p));
-var shortName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
-var pct = (c) => c.eco + c.native ? c.eco / (c.eco + c.native) : null;
 function median(a) {
   if (!a.length) return 0;
   const b = [...a].sort((x, y) => x - y), m = b.length >> 1;
@@ -522,7 +530,6 @@ function sessionRow(s, cfg, calls = callsInWindow) {
     avoidedUsd: saved / 1e6 * rate
   };
 }
-var usesEco = (r) => r.main.eco + r.sub.eco + r.bash.compacted > 0;
 function compare(rows) {
   const groups = /* @__PURE__ */ new Map();
   for (const r of rows) {
@@ -580,11 +587,6 @@ function claudeEnv(home = process.env.CLAUDE_CONFIG_DIR ?? join4(homedir3(), ".c
   ];
   return Object.fromEntries(keys.map((k) => [k, process.env[k] ?? env[k]]).filter(([, v]) => v));
 }
-var CHEAP_SUB = "claude-sonnet-5.5";
-var priceRaw = (r, key) => {
-  const p = PRICES[key];
-  return p ? (r.input * p.input + r.write5m * p.cacheWrite5m + r.write1h * 2 * p.input + r.read * p.cacheRead + r.output * p.output) / 1e6 : 0;
-};
 function levers(list, env = claudeEnv()) {
   const sum = (f) => list.reduce((a, s) => a + f(s), 0);
   const subModels = {};
@@ -654,8 +656,154 @@ function insights(f = {}) {
     sessions: rows.slice(0, 40)
   };
 }
+var ECO_FILE, NATIVE_FILE, isBench, shortName, pct, usesEco, CHEAP_SUB, priceRaw;
+var init_insights = __esm({
+  "src/insights.ts"() {
+    "use strict";
+    init_config();
+    init_db();
+    init_pricing();
+    init_sessions();
+    ECO_FILE = ["eco:read", "eco:search", "eco:edit"];
+    NATIVE_FILE = ["Read", "Grep", "Glob", "Edit", "MultiEdit"];
+    isBench = (project, cfg) => cfg.excludeProjects.some((p) => p && project.includes(p));
+    shortName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+    pct = (c) => c.eco + c.native ? c.eco / (c.eco + c.native) : null;
+    usesEco = (r) => r.main.eco + r.sub.eco + r.bash.compacted > 0;
+    CHEAP_SUB = "claude-sonnet-5.5";
+    priceRaw = (r, key) => {
+      const p = PRICES[key];
+      return p ? (r.input * p.input + r.write5m * p.cacheWrite5m + r.write1h * 2 * p.input + r.read * p.cacheRead + r.output * p.output) / 1e6 : 0;
+    };
+  }
+});
+
+// src/audit.ts
+var audit_exports = {};
+__export(audit_exports, {
+  audit: () => audit,
+  auditText: () => auditText
+});
+import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync4 } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { dirname, join as join5, resolve as resolve2 } from "node:path";
+function claudeMd(file, seen = /* @__PURE__ */ new Set()) {
+  if (seen.has(file) || !existsSync3(file)) return 0;
+  seen.add(file);
+  const text = read(file);
+  let n = estimateTokens(text);
+  for (const m of text.matchAll(/^@(\S+)/gm)) {
+    const p = m[1].startsWith("~/") ? join5(homedir4(), m[1].slice(2)) : resolve2(dirname(file), m[1]);
+    n += claudeMd(p, seen);
+  }
+  return n;
+}
+function components(root, source) {
+  const out = [];
+  const add = (kind, files) => {
+    const descs = files.map((f) => description(read(f))).filter(Boolean);
+    if (descs.length) out.push({ source, kind, count: descs.length, tokens: estimateTokens(descs.join("\n")) });
+  };
+  const ls = (d) => {
+    try {
+      return readdirSync2(d);
+    } catch {
+      return [];
+    }
+  };
+  const skills = [];
+  const walk = (d, depth) => {
+    if (existsSync3(join5(d, "SKILL.md"))) {
+      skills.push(join5(d, "SKILL.md"));
+      return;
+    }
+    if (depth < 4) {
+      for (const s of ls(d)) if (s !== "node_modules" && !s.startsWith(".")) walk(join5(d, s), depth + 1);
+    }
+  };
+  for (const s of ls(join5(root, "skills"))) walk(join5(root, "skills", s), 1);
+  add("skills", skills);
+  add("agents", ls(join5(root, "agents")).filter((f) => f.endsWith(".md")).map((f) => join5(root, "agents", f)));
+  add("commands", ls(join5(root, "commands")).filter((f) => f.endsWith(".md")).map((f) => join5(root, "commands", f)));
+  const hooks = read(join5(root, "hooks", "hooks.json"));
+  if (/"SessionStart"/.test(hooks)) out.push({ source, kind: "SessionStart hook", count: 1, tokens: 0, note: "injects text at startup (size known at run time)" });
+  const mcp = read(join5(root, ".mcp.json"));
+  try {
+    const n = Object.keys(JSON.parse(mcp).mcpServers ?? JSON.parse(mcp)).length;
+    if (n) out.push({ source, kind: "MCP servers", count: n, tokens: 0, note: "tool schemas loaded (or deferred) at startup" });
+  } catch {
+  }
+  return out;
+}
+function audit(cwd = process.cwd(), home = process.env.CLAUDE_CONFIG_DIR ?? join5(homedir4(), ".claude")) {
+  const items = [];
+  const user = claudeMd(join5(home, "CLAUDE.md"));
+  if (user) items.push({ source: "~/.claude", kind: "CLAUDE.md", count: 1, tokens: user });
+  for (const f of [join5(cwd, "CLAUDE.md"), join5(cwd, ".claude", "CLAUDE.md"), join5(cwd, "CLAUDE.local.md")]) {
+    const n = claudeMd(f);
+    if (n) items.push({ source: "project", kind: f.slice(cwd.length + 1), count: 1, tokens: n });
+  }
+  items.push(...components(home, "~/.claude"));
+  let enabled = {};
+  try {
+    enabled = JSON.parse(read(join5(home, "settings.json"))).enabledPlugins ?? {};
+  } catch {
+  }
+  let installed = {};
+  try {
+    installed = JSON.parse(read(join5(home, "plugins", "installed_plugins.json"))).plugins ?? {};
+  } catch {
+  }
+  for (const [id, on] of Object.entries(enabled)) {
+    if (!on) continue;
+    const entry = installed[id]?.find((x) => x.scope === "user") ?? installed[id]?.[0];
+    if (entry && existsSync3(entry.installPath)) items.push(...components(entry.installPath, id.split("@")[0]));
+  }
+  return items.sort((a, b) => b.tokens - a.tokens);
+}
+function auditText(measured) {
+  const items = audit();
+  const total = items.reduce((a, i) => a + i.tokens, 0);
+  return [
+    "token-eco audit \u2014 what every session and subagent loads before your first message (re-read on every turn)",
+    ...items.map((i) => `  ${i.source.padEnd(22)} ${`${i.count} ${i.kind}`.padEnd(26)} ${i.tokens ? `~${i.tokens} tok` : ""}${i.note ? `  (${i.note})` : ""}`),
+    `  ${"".padEnd(22)} ${"listed total".padEnd(26)} ~${total} tok`,
+    measured ? `Measured starting context (median): ${measured.main} tok main thread, ${measured.sub} tok per subagent \u2014 the rest is Claude Code's own prompt and tool schemas.` : "",
+    "Disable plugins you do not use (claude plugin disable <name>) and keep CLAUDE.md short: each 10K tokens is re-read on every turn."
+  ].filter(Boolean).join("\n");
+}
+var read, description;
+var init_audit = __esm({
+  "src/audit.ts"() {
+    "use strict";
+    init_tokens();
+    read = (f) => {
+      try {
+        return readFileSync4(f, "utf8");
+      } catch {
+        return "";
+      }
+    };
+    description = (md) => {
+      const fm = /^---\n([\s\S]*?)\n---/.exec(md)?.[1] ?? "";
+      const name = /^name:\s*(.*)$/m.exec(fm)?.[1] ?? "";
+      const desc = /^description:\s*([\s\S]*?)(?=^\w[\w-]*:|$(?![\s\S]))/m.exec(fm)?.[1] ?? "";
+      return `${name} ${desc}`.trim();
+    };
+  }
+});
+
+// src/cli.ts
+init_config();
+import { spawn } from "node:child_process";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // src/stats.ts
+init_db();
+init_config();
+init_pricing();
+init_tokens();
+init_insights();
 function formatTokens(n) {
   const a = Math.abs(n);
   if (a < 1e3) return String(Math.round(n));
@@ -746,6 +894,7 @@ function summaryText() {
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+init_insights();
 var HTML = fileURLToPath(new URL("../public/index.html", import.meta.url));
 var HEADERS = {
   "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:",
@@ -821,6 +970,18 @@ switch (cmd) {
   case "stats":
     console.log(summaryText());
     break;
+  case "audit": {
+    const { auditText: auditText2 } = await Promise.resolve().then(() => (init_audit(), audit_exports));
+    const { insights: insights2 } = await Promise.resolve().then(() => (init_insights(), insights_exports));
+    let measured;
+    try {
+      const s = insights2({ days: 30 }).levers.start;
+      measured = { main: s.main, sub: s.sub };
+    } catch {
+    }
+    console.log(auditText2(measured));
+    break;
+  }
   case "statusline": {
     const { aggregate: aggregate2 } = await Promise.resolve().then(() => (init_db(), db_exports));
     const { toDollars: toDollars2 } = await Promise.resolve().then(() => (init_config(), config_exports));

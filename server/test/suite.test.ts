@@ -362,6 +362,27 @@ test("sessions: real usage from Claude Code logs (dedup by message id, subagents
   await rm(root, { recursive: true, force: true });
 });
 
+test("audit: CLAUDE.md with @imports, nested skills, agents, enabled plugins only", async () => {
+  const { audit } = await import("../src/audit.ts");
+  const { mkdir } = await import("node:fs/promises");
+  const home = await mkdtemp(join(tmpdir(), "token-eco-audit-")), plug = join(home, "plug");
+  await mkdir(join(plug, "skills", "cat", "s1"), { recursive: true });
+  await mkdir(join(home, "agents"), { recursive: true });
+  await mkdir(join(home, "plugins"), { recursive: true });
+  await writeFile(join(home, "CLAUDE.md"), "x".repeat(400) + "\n@extra.md\n");
+  await writeFile(join(home, "extra.md"), "y".repeat(400));
+  await writeFile(join(home, "agents", "a.md"), "---\nname: a\ndescription: does things\n---\nbody ".repeat(1));
+  await writeFile(join(plug, "skills", "cat", "s1", "SKILL.md"), "---\nname: s1\ndescription: skill one\n---\nlong body");
+  await writeFile(join(home, "settings.json"), JSON.stringify({ enabledPlugins: { "p@m": true, "off@m": false } }));
+  await writeFile(join(home, "plugins", "installed_plugins.json"), JSON.stringify({ plugins: { "p@m": [{ scope: "user", installPath: plug }] } }));
+  const items = audit(join(home, "nowhere"), home);
+  const find = (src: string, kind: string) => items.find((i) => i.source === src && i.kind === kind);
+  assert.ok(find("~/.claude", "CLAUDE.md")!.tokens > 200); // both files
+  assert.equal(find("~/.claude", "agents")!.count, 1);
+  assert.equal(find("p", "skills")!.count, 1);
+  await rm(home, { recursive: true, force: true });
+});
+
 test("nodeBinary: falls back to PATH node when the recorded binary vanished (Homebrew upgrade)", async () => {
   const { nodeBinary } = await import("../src/config.ts");
   assert.equal(nodeBinary(process.execPath), process.execPath);
