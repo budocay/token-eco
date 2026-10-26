@@ -158,9 +158,9 @@ function recordRedirect(session, tool, target, outcome) {
 }
 
 // src/compact.ts
-var TESTS = /^(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|^(npx\s+)?(jest|vitest|mocha|ava|playwright\s+test)\b|^(python3?\s+-m\s+)?pytest\b|^go\s+test\b|^cargo\s+(test|nextest)\b|^node\s+--test\b|^(bundle\s+exec\s+)?rspec\b|^dotnet\s+test\b|^mvn\b.*\btest\b|^gradlew?\b.*\btest\b|^mix\s+test\b|^phpunit\b/;
-var INSTALL = /^(npm|pnpm|yarn|bun)\s+(install|i|add|ci|update)\b|^pip3?\s+install\b|^(uv\s+)?pip\s+install\b|^poetry\s+(install|add)\b|^cargo\s+(fetch|update)\b|^go\s+(mod|get)\b|^bundle(\s+install)?$|^composer\s+(install|update|require)\b|^brew\s+(install|upgrade)\b/;
-var BUILD = /^(npm|pnpm|yarn|bun)\s+run\s+(build|lint|typecheck|check)\b|^(npx\s+)?(tsc|eslint|biome|prettier\s+--check|ruff|mypy|pyright|next\s+build|vite\s+build|webpack)\b|^cargo\s+(build|check|clippy)\b|^go\s+(build|vet)\b|^make\b|^gradlew?\b|^mvn\b|^dotnet\s+build\b|^swift\s+build\b/;
+var TESTS = /^(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|^(npx\s+)?(jest|vitest|mocha|ava|playwright\s+test)\b|^(python3?\s+-m\s+)?pytest\b|^go\s+test\b|^cargo\s+(test|nextest)\b|^node\s+--test\b|^(bundle\s+exec\s+)?rspec\b|^dotnet\s+test\b|^mvn\b.*\btest\b|^gradlew?\b.*\btest\b|^mix\s+test\b|^phpunit\b|^(flutter|dart)\s+test\b/;
+var INSTALL = /^(npm|pnpm|yarn|bun)\s+(install|i|add|ci|update)\b|^pip3?\s+install\b|^(uv\s+)?pip\s+install\b|^poetry\s+(install|add)\b|^cargo\s+(fetch|update)\b|^go\s+(mod|get)\b|^bundle(\s+install)?$|^composer\s+(install|update|require)\b|^brew\s+(install|upgrade)\b|^(flutter|dart)\s+pub\s+(get|upgrade|add)\b/;
+var BUILD = /^(npm|pnpm|yarn|bun)\s+run\s+(build|lint|typecheck|check)\b|^(npx\s+)?(tsc|eslint|biome|prettier\s+--check|ruff|mypy|pyright|next\s+build|vite\s+build|webpack)\b|^cargo\s+(build|check|clippy)\b|^go\s+(build|vet)\b|^make\b|^gradlew?\b|^mvn\b|^dotnet\s+build\b|^swift\s+build\b|^flutter\s+(analyze|build)\b|^dart\s+(analyze|compile)\b/;
 var GIT = /^git\s+(status|log|diff|show|branch|fetch|pull|push|commit|add|checkout|switch|merge|rebase|stash)\b/;
 function normalizeCommand(command) {
   return command.trim().replace(/^(?:\S*\/)?(?:\.?venv|env)\/bin\//, "").replace(/^(?:\S*\/)?node_modules\/\.bin\//, "").replace(/^(?:uv|poetry|pipenv|hatch|pdm|rye)\s+run\s+/, "").replace(/^python[\d.]*\s+-m\s+/, "");
@@ -1081,6 +1081,22 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
   if (config.hook.mode === "off") return { action: "pass" };
   const ti = e.tool_input ?? {};
   let key, message, file;
+  const cat = e.tool_name === "Bash" && !ti.run_in_background ? /^(?:cd\s+("[^"]+"|'[^']+'|[^\s;&|<>]+)\s*&&\s*)?cat\s+("[^"]+"|'[^']+'|[^\s;&|<>$`*?-][^\s;&|<>$`*?]*)\s*$/.exec(String(ti.command ?? "").trim()) : null;
+  if (cat) {
+    const unq = (s) => s.replace(/^(["'])(.*)\1$/, "$2");
+    const dir = cat[1] ? isAbsolute(unq(cat[1])) || !e.cwd ? unq(cat[1]) : join3(e.cwd, unq(cat[1])) : e.cwd;
+    const f = unq(cat[2]);
+    const abs = isAbsolute(f) || !dir ? f : join3(dir, f);
+    let n = 0;
+    try {
+      n = NON_TEXT.has(extname2(abs).toLowerCase()) ? 0 : linesOf(abs);
+    } catch {
+    }
+    if (n > config.hook.lineThreshold) {
+      e = { ...e, tool_input: { file_path: abs } };
+      return redirectRead(e, abs, n, state, now, `\`cat ${f}\``);
+    }
+  }
   if (e.tool_name === "Bash") {
     const complete = String(ti.command ?? "").trim();
     const split = ti.run_in_background ? null : splitCompound(complete);
@@ -1118,8 +1134,7 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
       return { action: "pass" };
     }
     if (n <= config.hook.lineThreshold) return { action: "pass" };
-    key = `Read|${file}`;
-    message = `token-eco: ${f} has ${n === Infinity ? "many" : n} lines; a full Read is expensive. Its outline is below. Next, read only what you need with the token-eco tool read (name = symbol, or start/end) or Read with offset/limit. ${RETRY_HINT}`;
+    return redirectRead(e, file, n, state, now, "a full Read");
   } else if (e.tool_name === "Grep") {
     if (ti.output_mode !== "content") return { action: "pass" };
     key = `Grep|${String(ti.pattern)}|${String(ti.path ?? "")}|${String(ti.glob ?? "")}`;
@@ -1128,6 +1143,13 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
   key = `${e.session_id ?? "?"}|${key}`;
   const prior = state[key];
   if (prior && now - prior < DELAI_REPLI_MS) return { action: "fallback", key };
+  return { action: "refused", key, message, file };
+}
+function redirectRead(e, file, n, state, now, what) {
+  const key = `${e.session_id ?? "?"}|Read|${file}`;
+  const prior = state[key];
+  if (prior && now - prior < DELAI_REPLI_MS) return { action: "fallback", key };
+  const message = `token-eco: ${file} has ${n === Infinity ? "many" : n} lines; ${what} is expensive. Its outline is below. Next, read only what you need with the token-eco tool read (name = symbol, or start/end) or Read with offset/limit. ${RETRY_HINT}`;
   return { action: "refused", key, message, file };
 }
 function measureRead(e, file, returned, native) {

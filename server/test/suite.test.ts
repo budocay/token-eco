@@ -12,7 +12,7 @@ import { record, aggregate, byKey, byDay, recent, closeDb, openDb } from "../src
 import { summaryText, statistics, formatTokens, formatUsd } from "../src/stats.ts";
 import { startServer } from "../src/web.ts";
 import { decide, ruleMatches } from "../src/hook.ts";
-import { compact } from "../src/compact.ts";
+import { compact, family } from "../src/compact.ts";
 import { read } from "../src/tools/read.ts";
 import { searchCompact } from "../src/tools/searchCompact.ts";
 import { DEFAULT_CONFIG } from "../src/config.ts";
@@ -126,6 +126,21 @@ test("hook: full Read of a big file refused then allowed on the 2nd try; small f
   assert.equal(decide({ tool_name: "Grep", tool_input: { pattern: "x" } }, cfg, {}, 0).action, "pass");
   assert.equal(decide({ tool_name: "Grep", tool_input: { pattern: "x", output_mode: "content" } }, cfg, {}, 0).action, "refused");
   assert.equal(decide(read, { ...cfg, hook: { mode: "off", lineThreshold: 300 } }, {}, 0, lines(800)).action, "pass");
+});
+
+test("hook: `cat big-file` in Bash handled as a full Read (shared retry state); small files, pipes, flags let through", () => {
+  const cfg = { ...DEFAULT_CONFIG, hook: { mode: "redirect" as const, lineThreshold: 300 } };
+  const seen: string[] = [];
+  const lines = (n: number) => (f: string) => { seen.push(f); return n; };
+  const bash = (command: string) => ({ session_id: "s", cwd: "/p", tool_name: "Bash", tool_input: { command } });
+  const d = decide(bash("cd sub && cat 'a b.ts'"), cfg, {}, 0, lines(800));
+  assert.equal(d.action, "refused");
+  assert.equal((d as { key: string }).key, "s|Read|/p/sub/a b.ts");
+  assert.match((d as { message: string }).message, /`cat a b.ts` is expensive/);
+  assert.equal(decide(bash("cat a.ts"), cfg, { "s|Read|/p/a.ts": 500 }, 1000, lines(800)).action, "fallback"); // a Read was refused before
+  assert.equal(decide(bash("cat a.ts"), cfg, {}, 0, lines(100)).action, "pass");
+  for (const c of ["cat a.ts | head", "cat -n a.ts", "cat a.ts b.ts", "cat $F"]) assert.equal(decide(bash(c), cfg, {}, 0, lines(800)).action, "pass", c);
+  assert.equal(family("flutter test"), "test"); assert.equal(family("flutter analyze"), "build"); assert.equal(family("dart pub get"), "install");
 });
 
 test("hook Bash: transparent rewrite, permissions respected, compound commands left alone", () => {

@@ -139,6 +139,23 @@ export function decide(e: HookInput, config: Config, state: State, now = Date.no
   const ti = e.tool_input ?? {};
   let key: string, message: string, file: string | undefined;
 
+  // `cat big-file` in Bash = a full Read in disguise (subagents do it a lot): same redirect, same retry state.
+  const cat = e.tool_name === "Bash" && !ti.run_in_background
+    ? /^(?:cd\s+("[^"]+"|'[^']+'|[^\s;&|<>]+)\s*&&\s*)?cat\s+("[^"]+"|'[^']+'|[^\s;&|<>$`*?-][^\s;&|<>$`*?]*)\s*$/.exec(String(ti.command ?? "").trim())
+    : null;
+  if (cat) {
+    const unq = (s: string) => s.replace(/^(["'])(.*)\1$/, "$2");
+    const dir = cat[1] ? (isAbsolute(unq(cat[1])) || !e.cwd ? unq(cat[1]) : join(e.cwd, unq(cat[1]))) : e.cwd;
+    const f = unq(cat[2]);
+    const abs = isAbsolute(f) || !dir ? f : join(dir, f);
+    let n = 0;
+    try { n = NON_TEXT.has(extname(abs).toLowerCase()) ? 0 : linesOf(abs); } catch { /* missing: let cat fail */ }
+    if (n > config.hook.lineThreshold) {
+      e = { ...e, tool_input: { file_path: abs } };
+      return redirectRead(e, abs, n, state, now, `\`cat ${f}\``);
+    }
+  }
+
   if (e.tool_name === "Bash") {
     const complete = String(ti.command ?? "").trim();
     const split = ti.run_in_background ? null : splitCompound(complete);
@@ -168,9 +185,7 @@ export function decide(e: HookInput, config: Config, state: State, now = Date.no
     let n: number;
     try { n = linesOf(file); } catch { return { action: "pass" }; }
     if (n <= config.hook.lineThreshold) return { action: "pass" };
-    key = `Read|${file}`;
-    message = `token-eco: ${f} has ${n === Infinity ? "many" : n} lines; a full Read is expensive. Its outline is below. `
-      + `Next, read only what you need with the token-eco tool read (name = symbol, or start/end) or Read with offset/limit. ${RETRY_HINT}`;
+    return redirectRead(e, file, n, state, now, "a full Read");
   } else if (e.tool_name === "Grep") {
     if (ti.output_mode !== "content") return { action: "pass" };
     key = `Grep|${String(ti.pattern)}|${String(ti.path ?? "")}|${String(ti.glob ?? "")}`;
@@ -181,6 +196,16 @@ export function decide(e: HookInput, config: Config, state: State, now = Date.no
   key = `${e.session_id ?? "?"}|${key}`;
   const prior = state[key];
   if (prior && now - prior < DELAI_REPLI_MS) return { action: "fallback", key };
+  return { action: "refused", key, message, file };
+}
+
+/** Refuses once a whole-file read (Read, or `cat` in Bash) of a big file; allowed on the retry. */
+function redirectRead(e: HookInput, file: string, n: number, state: State, now: number, what: string): Decision {
+  const key = `${e.session_id ?? "?"}|Read|${file}`;
+  const prior = state[key];
+  if (prior && now - prior < DELAI_REPLI_MS) return { action: "fallback", key };
+  const message = `token-eco: ${file} has ${n === Infinity ? "many" : n} lines; ${what} is expensive. Its outline is below. `
+    + `Next, read only what you need with the token-eco tool read (name = symbol, or start/end) or Read with offset/limit. ${RETRY_HINT}`;
   return { action: "refused", key, message, file };
 }
 
