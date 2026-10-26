@@ -36,7 +36,9 @@ function claudeMd(file: string, seen = new Set<string>()): number {
 function components(root: string, source: string): AuditItem[] {
   const out: AuditItem[] = [];
   const add = (kind: string, files: string[]) => {
-    const descs = files.map((f) => description(read(f))).filter(Boolean);
+    // Same skill synced from several claude.ai organizations (skills/synced/<org>/<name>): loaded once.
+    const byName = new Map(files.map((f) => [f.split(/[\\/]/).slice(-2, -1)[0] + (kind === "skills" ? "" : f), f]));
+    const descs = [...byName.values()].map((f) => description(read(f))).filter(Boolean);
     if (descs.length) out.push({ source, kind, count: descs.length, tokens: estimateTokens(descs.join("\n")) });
   };
   const ls = (d: string) => { try { return readdirSync(d); } catch { return []; } };

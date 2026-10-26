@@ -7913,7 +7913,8 @@ function claudeMd(file, seen = /* @__PURE__ */ new Set()) {
 function components(root, source) {
   const out = [];
   const add = (kind, files) => {
-    const descs = files.map((f) => description(read2(f))).filter(Boolean);
+    const byName = new Map(files.map((f) => [f.split(/[\\/]/).slice(-2, -1)[0] + (kind === "skills" ? "" : f), f]));
+    const descs = [...byName.values()].map((f) => description(read2(f))).filter(Boolean);
     if (descs.length) out.push({ source, kind, count: descs.length, tokens: estimateTokens(descs.join("\n")) });
   };
   const ls = (d) => {
