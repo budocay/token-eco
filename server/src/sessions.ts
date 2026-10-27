@@ -12,7 +12,7 @@ import { PRICES, type ModelPrice } from "./pricing.ts";
 import { projectRoot } from "./project.ts";
 
 export interface SessionTotals {
-  id: string; project: string; workdir?: string; start: string; end: string; model: string;
+  id: string; project: string; workdir?: string; agent?: string; start: string; end: string; model: string;
   turns: number; subagentTurns: number; input: number; write5m: number; write1h: number; cacheRead: number;
   output: number; tokens: number; cost: number; peakContext: number; ecoCalls: number;
   tools: Record<string, number>; unpriced: string[];
@@ -65,6 +65,8 @@ export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { c
     let o: any;
     try { o = JSON.parse(line); } catch { continue; }
     if (!isSub && o.cwd && !t.project) t.project = o.cwd;
+    // Main-thread agent (settings "agent", set by a plugin or the user); the last one wins (it can change on resume).
+    if (!isSub && typeof o.agentSetting === "string") t.agent = o.agentSetting;
     if (o.timestamp) { if (!t.start || o.timestamp < t.start) t.start = o.timestamp; if (o.timestamp > t.end) t.end = o.timestamp; }
     const m = o.message;
     if (o.type !== "assistant" || !m) continue;

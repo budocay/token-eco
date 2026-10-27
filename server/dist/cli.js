@@ -430,6 +430,7 @@ function addLog(t, file, isSub, opts2 = {}) {
       continue;
     }
     if (!isSub && o.cwd && !t.project) t.project = o.cwd;
+    if (!isSub && typeof o.agentSetting === "string") t.agent = o.agentSetting;
     if (o.timestamp) {
       if (!t.start || o.timestamp < t.start) t.start = o.timestamp;
       if (o.timestamp > t.end) t.end = o.timestamp;
@@ -567,9 +568,11 @@ var init_sessions = __esm({
 // src/insights.ts
 var insights_exports = {};
 __export(insights_exports, {
+  agentShare: () => agentShare,
   breakdown: () => breakdown,
   claudeEnv: () => claudeEnv,
   compare: () => compare,
+  diagnose: () => diagnose,
   dominantModel: () => dominantModel,
   insights: () => insights,
   isBench: () => isBench,
@@ -596,6 +599,7 @@ function sessionRow(s, cfg, calls = callsInWindow) {
     id: s.id,
     project: s.project,
     name: shortName(s.project),
+    agent: s.agent ?? "",
     model: key,
     start: s.start,
     end: s.end,
@@ -736,8 +740,27 @@ function insights(f = {}) {
     breakdown: breakdown(list),
     levers: levers(list),
     compare: compare(rows),
+    agents: agentShare(rows),
+    diagnosis: diagnose(rows),
     sessions: rows.slice(0, 40)
   };
+}
+function agentShare(rows) {
+  const m = /* @__PURE__ */ new Map();
+  for (const r of rows) m.set(r.agent, (m.get(r.agent) ?? 0) + 1);
+  return [...m].map(([agent, sessions]) => ({ agent, sessions })).sort((a, b) => b.sessions - a.sessions);
+}
+function diagnose(rows) {
+  const out = [];
+  const recent2 = rows.slice(0, 10);
+  const others = /* @__PURE__ */ new Map();
+  for (const r of recent2) if (r.agent && !r.agent.startsWith("token-eco:")) others.set(r.agent, (others.get(r.agent) ?? 0) + 1);
+  for (const [agent, sessions] of others) out.push({ code: "other-agent", agent, sessions, latest: recent2[0]?.agent === agent });
+  const none = recent2.filter((r) => !r.agent).length;
+  if (none) out.push({ code: "no-agent", sessions: none });
+  const sub = recent2.reduce((a, r) => ({ eco: a.eco + r.sub.eco, native: a.native + r.sub.native }), { eco: 0, native: 0 });
+  if (sub.native > 50 && sub.native > 4 * sub.eco) out.push({ code: "sub-native", ...sub });
+  return out;
 }
 var ECO_FILE, NATIVE_FILE, isBench, pct, usesEco, CHEAP_SUB, priceRaw;
 var init_insights = __esm({
@@ -971,6 +994,10 @@ function summaryText(lang = uiLang()) {
         `  Co\xFBt       sous-agents ${p(b.cost ? b.costSub / b.cost : null)} \xB7 lectures cache ${p(b.cost ? b.kinds.read / b.cost : null)} \xB7 \xE9critures cache ${p(b.cost ? b.kinds.write / b.cost : null)} \xB7 sortie ${p(b.cost ? b.kinds.output / b.cost : null)}`
       ),
       `  ${L("Compare   ", "Comparaison")} ${verdict}`,
+      ...r.diagnosis.map((x) => "  \u26A0 " + (x.code === "other-agent" ? L(
+        `Another main agent is active: ${x.agent} (${x.sessions} of the last 10 sessions${x.latest ? ", including the latest" : ""}); disable that plugin to use token-eco:eco.`,
+        `Un autre agent principal est actif : ${x.agent} (${x.sessions} des 10 derni\xE8res sessions${x.latest ? ", dont la derni\xE8re" : ""}) ; d\xE9sactive ce plugin pour utiliser token-eco:eco.`
+      ) : x.code === "no-agent" ? L(`${x.sessions} of the last 10 sessions ran without a custom main agent.`, `${x.sessions} des 10 derni\xE8res sessions sans agent principal personnalis\xE9.`) : L(`Subagents mostly use built-in tools (${x.native} vs ${x.eco} token-eco).`, `Sous-agents surtout sur les outils natifs (${x.native} contre ${x.eco} token-eco).`))),
       L('Levers (measured; setting in ~/.claude/settings.json "env"):', 'Leviers (mesur\xE9s ; r\xE9glage dans ~/.claude/settings.json "env") :'),
       `  ${L("Context above 300K (main)    ", "Contexte au-del\xE0 de 300K     ")} ${formatUsd(r.levers.compaction.over300k).padStart(10)}  CLAUDE_CODE_AUTO_COMPACT_WINDOW = ${r.levers.compaction.setting ?? L("not set (try 300k)", "non r\xE9gl\xE9 (essayer 300k)")}`,
       `  ${L(`Subagents on ${r.levers.subagents.cheaperModel.replace("claude-", "")} would save`, `Sous-agents en ${r.levers.subagents.cheaperModel.replace("claude-", "")} : \xE9conomie`)} ${formatUsd(r.levers.subagents.saving).padStart(6)}  CLAUDE_CODE_SUBAGENT_MODEL = ${r.levers.subagents.setting ?? notSet}`,

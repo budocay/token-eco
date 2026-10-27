@@ -115,6 +115,7 @@ td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
       <span class="controls"><select id="realModel" title="Only sessions of this model"></select>
         <label class="chk"><input type="checkbox" id="bench"> benchmarks / temp dirs</label></span></h2>
     <p class="note" id="realScope"></p>
+    <div id="diag"></div>
     <section class="kpis">
       <div class="card kpi main"><p class="label">Coverage · main thread</p><div class="v" id="cMain">–</div><div class="d" id="cMainSub"></div></div>
       <div class="card kpi main"><p class="label">Coverage · subagents</p><div class="v" id="cSub">–</div><div class="d" id="cSubSub"></div></div>
@@ -238,6 +239,13 @@ const FR = {
     "Aucun projet n'a encore de sessions avec et sans token-eco sur le même modèle.",
   "Turns (+sub)": "Tours (+sub)", "Cost": "Coût", "Peak ctx": "Ctx max", "Cov. main": "Couv. princ.", "Cov. sub": "Couv. sub",
   "No Claude Code session log in this period.": "Aucun log de session Claude Code sur cette période.",
+  "Agent": "Agent", ", including the latest": ", dont la dernière",
+  "Another main agent is active: {0} ({1} of the last 10 sessions{2}). Two plugins set \"agent\" and only one wins: the token-eco tools are then barely used. Disable the other plugin (claude plugin disable …) to use token-eco:eco.":
+    "Un autre agent principal est actif : {0} ({1} des 10 dernières sessions{2}). Deux plugins définissent \"agent\" et un seul l'emporte : les outils token-eco sont alors très peu utilisés. Désactive l'autre plugin (claude plugin disable …) pour utiliser token-eco:eco.",
+  "{0} of the last 10 sessions ran without a custom main agent (plugin disabled at the time, older version, or claude -p).":
+    "{0} des 10 dernières sessions ont tourné sans agent principal personnalisé (plugin désactivé à ce moment-là, ancienne version, ou claude -p).",
+  "Subagents mostly use the built-in tools ({0} calls vs {1} token-eco): the hook redirects their whole-file reads (Read and cat) of big files.":
+    "Les sous-agents utilisent surtout les outils natifs ({0} appels contre {1} token-eco) : le hook redirige leurs lectures de fichiers entiers (Read et cat) quand ils sont gros.",
 };
 let lang = localStorage.getItem("te-lang") || ((navigator.language || "en").startsWith("fr") ? "fr" : "en");
 const t = (s, ...a) => (lang === "fr" ? FR[s] ?? s : s).replace(/\{(\d)\}/g, (_, i) => a[i]);
@@ -424,6 +432,14 @@ function renderSessions(s) {
   $("realScope").textContent = t("{0} session(s) shown, last {1} days", nf.format(s.sessions.length), s.filters.days)
     + (s.excluded ? t(" · {0} benchmark/temp session(s) hidden (excludeProjects in ~/.token-eco/config.json)", nf.format(s.excluded)) : "")
     + (s.autoModel ? t(" · main model: {0}", label(s.autoModel)) : "");
+  // Why the coverage is low (codes from insights.ts diagnose()).
+  const D = {
+    "other-agent": (x) => t("Another main agent is active: {0} ({1} of the last 10 sessions{2}). Two plugins set \"agent\" and only one wins: the token-eco tools are then barely used. Disable the other plugin (claude plugin disable …) to use token-eco:eco.",
+      `<code>${esc(x.agent)}</code>`, x.sessions, x.latest ? t(", including the latest") : ""),
+    "no-agent": (x) => t("{0} of the last 10 sessions ran without a custom main agent (plugin disabled at the time, older version, or claude -p).", x.sessions),
+    "sub-native": (x) => t("Subagents mostly use the built-in tools ({0} calls vs {1} token-eco): the hook redirects their whole-file reads (Read and cat) of big files.", nf.format(x.native), nf.format(x.eco)),
+  };
+  $("diag").innerHTML = (s.diagnosis || []).map((x) => `<p class="note" style="border-left:3px solid ${x.code === "other-agent" ? "#ff7a8a" : "#ffb35c"};padding-left:10px">⚠ ${D[x.code]?.(x) ?? esc(x.code)}</p>`).join("");
   const c = s.coverage;
   $("cMain").textContent = share(c.mainPct);
   $("cMainSub").textContent = t("{0} token-eco / {1} built-in", nf.format(c.main.eco), nf.format(c.main.native));
@@ -475,10 +491,10 @@ function renderSessions(s) {
       <td class="n">${tok(x.peakContext)}</td><td class="n">${usd(x.costPerSession)}</td></tr>`)).join("")}</table>`
     : `<div class="empty">${t("No project has sessions both with and without token-eco on the same model yet.")}</div>`;
 
-  $("realRecent").innerHTML = s.sessions.length ? `<table><tr>${["When", "Project", "Model"].map((h) => `<th>${t(h)}</th>`).join("")}
+  $("realRecent").innerHTML = s.sessions.length ? `<table><tr>${["When", "Project", "Agent", "Model"].map((h) => `<th>${t(h)}</th>`).join("")}
     ${["Turns (+sub)", "Cost", "$ / turn", "Peak ctx", "Cov. main", "Cov. sub", "Bash", "Avoided"].map((h) => `<th class="n">${t(h)}</th>`).join("")}</tr>
     ${s.sessions.slice(0, 25).map((x) => `<tr><td title="${esc(x.start)} → ${esc(x.end)}">${esc(ago(x.end))}</td>
-      <td title="${esc(x.project)}">${esc(x.name)}</td><td>${esc(label(x.model))}</td>
+      <td title="${esc(x.project)}">${esc(x.name)}</td><td class="${x.agent.startsWith("token-eco:") ? "good" : x.agent ? "bad" : ""}">${esc(x.agent || "–")}</td><td>${esc(label(x.model))}</td>
       <td class="n">${nf.format(x.turns)}${x.subagentTurns ? ` +${nf.format(x.subagentTurns)}` : ""}</td><td class="n">${usd(x.cost)}</td>
       <td class="n">${usd(x.costPerTurn)}</td><td class="n">${tok(x.peakContext)}</td><td class="n">${cov(x.main)}</td><td class="n">${cov(x.sub)}</td>
       <td class="n">${x.bash.total ? `${nf.format(x.bash.compacted)}/${nf.format(x.bash.total)}` : "–"}</td>

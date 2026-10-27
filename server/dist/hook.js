@@ -1141,20 +1141,23 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
   if (config.hook.mode === "off") return { action: "pass" };
   const ti = e.tool_input ?? {};
   let key, message, file;
-  const cat = e.tool_name === "Bash" && !ti.run_in_background ? /^(?:cd\s+("[^"]+"|'[^']+'|[^\s;&|<>]+)\s*&&\s*)?cat\s+("[^"]+"|'[^']+'|[^\s;&|<>$`*?-][^\s;&|<>$`*?]*)\s*$/.exec(String(ti.command ?? "").trim()) : null;
-  if (cat) {
-    const unq = (s) => s.replace(/^(["'])(.*)\1$/, "$2");
-    const dir = cat[1] ? isAbsolute2(unq(cat[1])) || !e.cwd ? unq(cat[1]) : join4(e.cwd, unq(cat[1])) : e.cwd;
-    const f = unq(cat[2]);
-    const abs = isAbsolute2(f) || !dir ? f : join4(dir, f);
-    let n = 0;
-    try {
-      n = NON_TEXT.has(extname2(abs).toLowerCase()) ? 0 : linesOf(abs);
-    } catch {
+  const cats = e.tool_name === "Bash" && !ti.run_in_background ? catTargets(String(ti.command ?? ""), e.cwd) : null;
+  if (cats) {
+    let big = "", n = 0;
+    for (const abs of cats) {
+      let k = 0;
+      try {
+        k = NON_TEXT.has(extname2(abs).toLowerCase()) ? 0 : linesOf(abs);
+      } catch {
+      }
+      if (k > n) {
+        n = k;
+        big = abs;
+      }
     }
     if (n > config.hook.lineThreshold) {
-      e = { ...e, tool_input: { file_path: abs } };
-      return redirectRead(e, abs, n, state, now, `\`cat ${f}\``);
+      e = { ...e, tool_input: { file_path: big } };
+      return redirectRead(e, big, n, state, now, cats.length > 1 ? `\`cat\` of ${cats.length} files including this one` : `\`cat ${big}\``);
     }
   }
   if (e.tool_name === "Bash") {
@@ -1204,6 +1207,32 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
   const prior = state[key];
   if (prior && now - prior < DELAI_REPLI_MS) return { action: "fallback", key };
   return { action: "refused", key, message, file };
+}
+function catTargets(command, cwd) {
+  const split = splitCompound(command.trim());
+  if (!split || split.ops.some((o) => o !== "&&" && o !== ";")) return null;
+  const unq = (s) => s.replace(/^(["'])(.*)\1$/, "$2");
+  const ARG = /("[^"]+"|'[^']+'|[^\s;&|<>$`*?()]+)/g;
+  let dir = cwd;
+  const files = [];
+  for (const part of split.parts) {
+    const p = part.trim();
+    const cd = /^cd\s+("[^"]+"|'[^']+'|[^\s;&|<>$`]+)$/.exec(p);
+    if (cd) {
+      const d = unq(cd[1]);
+      dir = isAbsolute2(d) || !dir ? d : join4(dir, d);
+      continue;
+    }
+    const m = /^cat((?:\s+-n)?)\s+(.+)$/.exec(p);
+    if (!m) return null;
+    const args = m[2].match(ARG) ?? [];
+    if (args.join(" ").length !== m[2].replace(/\s+/g, " ").trim().length || args.some((a) => a.startsWith("-"))) return null;
+    for (const a of args) {
+      const f = unq(a);
+      files.push(isAbsolute2(f) || !dir ? f : join4(dir, f));
+    }
+  }
+  return files.length ? files : null;
 }
 function redirectRead(e, file, n, state, now, what) {
   const key = `${e.session_id ?? "?"}|Read|${file}`;
@@ -1284,6 +1313,7 @@ if (process.argv[1] && /hook\.(ts|js)$/.test(process.argv[1])) {
   main().catch(() => process.exit(0));
 }
 export {
+  catTargets,
   countLines,
   decide,
   decompose,

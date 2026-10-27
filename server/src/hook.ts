@@ -140,19 +140,18 @@ export function decide(e: HookInput, config: Config, state: State, now = Date.no
   let key: string, message: string, file: string | undefined;
 
   // `cat big-file` in Bash = a full Read in disguise (subagents do it a lot): same redirect, same retry state.
-  const cat = e.tool_name === "Bash" && !ti.run_in_background
-    ? /^(?:cd\s+("[^"]+"|'[^']+'|[^\s;&|<>]+)\s*&&\s*)?cat\s+("[^"]+"|'[^']+'|[^\s;&|<>$`*?-][^\s;&|<>$`*?]*)\s*$/.exec(String(ti.command ?? "").trim())
-    : null;
-  if (cat) {
-    const unq = (s: string) => s.replace(/^(["'])(.*)\1$/, "$2");
-    const dir = cat[1] ? (isAbsolute(unq(cat[1])) || !e.cwd ? unq(cat[1]) : join(e.cwd, unq(cat[1]))) : e.cwd;
-    const f = unq(cat[2]);
-    const abs = isAbsolute(f) || !dir ? f : join(dir, f);
-    let n = 0;
-    try { n = NON_TEXT.has(extname(abs).toLowerCase()) ? 0 : linesOf(abs); } catch { /* missing: let cat fail */ }
+  // Also `cat -n f`, `cat a b c` and chains like `cd x && cat a && cat b` (measured: most subagent cats).
+  const cats = e.tool_name === "Bash" && !ti.run_in_background ? catTargets(String(ti.command ?? ""), e.cwd) : null;
+  if (cats) {
+    let big = "", n = 0;
+    for (const abs of cats) {
+      let k = 0;
+      try { k = NON_TEXT.has(extname(abs).toLowerCase()) ? 0 : linesOf(abs); } catch { /* missing: let cat fail */ }
+      if (k > n) { n = k; big = abs; }
+    }
     if (n > config.hook.lineThreshold) {
-      e = { ...e, tool_input: { file_path: abs } };
-      return redirectRead(e, abs, n, state, now, `\`cat ${f}\``);
+      e = { ...e, tool_input: { file_path: big } };
+      return redirectRead(e, big, n, state, now, cats.length > 1 ? `\`cat\` of ${cats.length} files including this one` : `\`cat ${big}\``);
     }
   }
 
@@ -197,6 +196,28 @@ export function decide(e: HookInput, config: Config, state: State, now = Date.no
   const prior = state[key];
   if (prior && now - prior < DELAI_REPLI_MS) return { action: "fallback", key };
   return { action: "refused", key, message, file };
+}
+
+/** Files printed whole by a command made only of `cd …` and `cat [-n] file…` parts (joined by && or ;),
+ *  as absolute paths; null for anything else (pipes, redirections, globs, variables, heredocs…). */
+export function catTargets(command: string, cwd?: string): string[] | null {
+  const split = splitCompound(command.trim());
+  if (!split || split.ops.some((o) => o !== "&&" && o !== ";")) return null;
+  const unq = (s: string) => s.replace(/^(["'])(.*)\1$/, "$2");
+  const ARG = /("[^"]+"|'[^']+'|[^\s;&|<>$`*?()]+)/g;
+  let dir = cwd;
+  const files: string[] = [];
+  for (const part of split.parts) {
+    const p = part.trim();
+    const cd = /^cd\s+("[^"]+"|'[^']+'|[^\s;&|<>$`]+)$/.exec(p);
+    if (cd) { const d = unq(cd[1]); dir = isAbsolute(d) || !dir ? d : join(dir, d); continue; }
+    const m = /^cat((?:\s+-n)?)\s+(.+)$/.exec(p);
+    if (!m) return null;
+    const args = m[2].match(ARG) ?? [];
+    if (args.join(" ").length !== m[2].replace(/\s+/g, " ").trim().length || args.some((a) => a.startsWith("-"))) return null;
+    for (const a of args) { const f = unq(a); files.push(isAbsolute(f) || !dir ? f : join(dir, f)); }
+  }
+  return files.length ? files : null;
 }
 
 /** Refuses once a whole-file read (Read, or `cat` in Bash) of a big file; allowed on the retry. */

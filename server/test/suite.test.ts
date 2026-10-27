@@ -128,6 +128,17 @@ test("hook: full Read of a big file refused then allowed on the 2nd try; small f
   assert.equal(decide(read, { ...cfg, hook: { mode: "off", lineThreshold: 300 } }, {}, 0, lines(800)).action, "pass");
 });
 
+test("diagnose: other main agent, no agent, subagents on built-in tools", async () => {
+  const { diagnose, agentShare } = await import("../src/insights.ts");
+  const row = (agent: string, subNative = 0) => ({ agent, sub: { eco: 0, native: subNative }, main: { eco: 0, native: 0 } }) as never;
+  const rows = [row("woz:code", 40), row("token-eco:eco", 30), row(""), row("woz:code")];
+  const d = diagnose(rows);
+  assert.deepEqual(d.map((x) => x.code), ["other-agent", "no-agent", "sub-native"]);
+  assert.deepEqual(d[0], { code: "other-agent", agent: "woz:code", sessions: 2, latest: true });
+  assert.equal(diagnose([row("token-eco:eco", 10)]).length, 0);
+  assert.deepEqual(agentShare(rows)[0], { agent: "woz:code", sessions: 2 });
+});
+
 test("hook: `cat big-file` in Bash handled as a full Read (shared retry state); small files, pipes, flags let through", () => {
   const cfg = { ...DEFAULT_CONFIG, hook: { mode: "redirect" as const, lineThreshold: 300 } };
   const seen: string[] = [];
@@ -136,10 +147,16 @@ test("hook: `cat big-file` in Bash handled as a full Read (shared retry state); 
   const d = decide(bash("cd sub && cat 'a b.ts'"), cfg, {}, 0, lines(800));
   assert.equal(d.action, "refused");
   assert.equal((d as { key: string }).key, "s|Read|/p/sub/a b.ts");
-  assert.match((d as { message: string }).message, /`cat a b.ts` is expensive/);
+  assert.match((d as { message: string }).message, /`cat \/p\/sub\/a b.ts` is expensive/);
   assert.equal(decide(bash("cat a.ts"), cfg, { "s|Read|/p/a.ts": 500 }, 1000, lines(800)).action, "fallback"); // a Read was refused before
   assert.equal(decide(bash("cat a.ts"), cfg, {}, 0, lines(100)).action, "pass");
-  for (const c of ["cat a.ts | head", "cat -n a.ts", "cat a.ts b.ts", "cat $F"]) assert.equal(decide(bash(c), cfg, {}, 0, lines(800)).action, "pass", c);
+  for (const c of ["cat a.ts | head", "cat $F", "cat a.ts > b.ts", "cat *.ts", "cat -A a.ts", "cat a.ts || echo x"]) assert.equal(decide(bash(c), cfg, {}, 0, lines(800)).action, "pass", c);
+  // cat -n, several files, chains: the biggest file is redirected
+  for (const c of ["cat -n a.ts", "cat a.ts b.ts", "cd /q && cat x.md; cat a.ts"]) assert.equal(decide(bash(c), cfg, {}, 0, lines(800)).action, "refused", c);
+  const big = (f: string) => (f.endsWith("big.ts") ? 900 : 20);
+  const m = decide(bash("cd /q && cat small.ts && cat -n big.ts"), cfg, {}, 0, big);
+  assert.equal((m as { key: string }).key, "s|Read|/q/big.ts");
+  assert.match((m as { message: string }).message, /`cat` of 2 files including this one/);
   assert.equal(family("flutter test"), "test"); assert.equal(family("flutter analyze"), "build"); assert.equal(family("dart pub get"), "install");
 });
 

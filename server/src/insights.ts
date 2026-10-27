@@ -22,7 +22,7 @@ export interface Filters { project?: string; model?: string; days?: number; incl
 
 export interface Coverage { eco: number; native: number }
 export interface SessionRow {
-  id: string; project: string; name: string; model: string; start: string; end: string;
+  id: string; project: string; name: string; agent: string; model: string; start: string; end: string;
   turns: number; subagentTurns: number; cost: number; costSub: number; costPerTurn: number; tokensPerTurn: number;
   peakContext: number; main: Coverage; sub: Coverage; bash: { total: number; compacted: number };
   avoidedTokens: number; avoidedUsd: number;
@@ -46,7 +46,7 @@ export function sessionRow(s: SessionTotals, cfg: Config, calls = callsInWindow)
   const saved = eco.reduce((a, c) => a + c.saved, 0);
   const allTurns = s.turns + s.subagentTurns;
   return {
-    id: s.id, project: s.project, name: shortName(s.project), model: key, start: s.start, end: s.end,
+    id: s.id, project: s.project, name: shortName(s.project), agent: s.agent ?? "", model: key, start: s.start, end: s.end,
     turns: s.turns, subagentTurns: s.subagentTurns, cost: s.cost, costSub: s.costSub,
     costPerTurn: allTurns ? s.cost / allTurns : 0, tokensPerTurn: allTurns ? Math.round(s.tokens / allTurns) : 0,
     peakContext: s.peakContext,
@@ -166,6 +166,33 @@ export function insights(f: Filters = {}) {
     breakdown: breakdown(list),
     levers: levers(list),
     compare: compare(rows),
+    agents: agentShare(rows),
+    diagnosis: diagnose(rows),
     sessions: rows.slice(0, 40),
   };
+}
+
+/** Main-thread agent of the sessions ("" = none / plugin agent not applied). */
+export function agentShare(rows: SessionRow[]): { agent: string; sessions: number }[] {
+  const m = new Map<string, number>();
+  for (const r of rows) m.set(r.agent, (m.get(r.agent) ?? 0) + 1);
+  return [...m].map(([agent, sessions]) => ({ agent, sessions })).sort((a, b) => b.sessions - a.sessions);
+}
+
+/** Why the coverage is low, as codes the dashboard / CLI turn into sentences (most recent sessions first). */
+export type Diagnosis =
+  | { code: "other-agent"; agent: string; sessions: number; latest: boolean }
+  | { code: "no-agent"; sessions: number }
+  | { code: "sub-native"; native: number; eco: number };
+export function diagnose(rows: SessionRow[]): Diagnosis[] {
+  const out: Diagnosis[] = [];
+  const recent = rows.slice(0, 10);
+  const others = new Map<string, number>();
+  for (const r of recent) if (r.agent && !r.agent.startsWith("token-eco:")) others.set(r.agent, (others.get(r.agent) ?? 0) + 1);
+  for (const [agent, sessions] of others) out.push({ code: "other-agent", agent, sessions, latest: recent[0]?.agent === agent });
+  const none = recent.filter((r) => !r.agent).length;
+  if (none) out.push({ code: "no-agent", sessions: none });
+  const sub = recent.reduce((a, r) => ({ eco: a.eco + r.sub.eco, native: a.native + r.sub.native }), { eco: 0, native: 0 });
+  if (sub.native > 50 && sub.native > 4 * sub.eco) out.push({ code: "sub-native", ...sub });
+  return out;
 }
