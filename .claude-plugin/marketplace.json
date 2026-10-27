@@ -7,7 +7,7 @@
       "name": "token-eco",
       "source": "./",
       "description": "Token-saving file tools + savings dashboard.",
-      "version": "0.7.2"
+      "version": "0.7.3"
     }
   ]
 }

@@ -133,9 +133,13 @@ test("diagnose: other main agent, no agent, subagents on built-in tools", async 
   const row = (agent: string, subNative = 0) => ({ agent, sub: { eco: 0, native: subNative }, main: { eco: 0, native: 0 } }) as never;
   const rows = [row("woz:code", 40), row("token-eco:eco", 30), row(""), row("woz:code")];
   const d = diagnose(rows);
-  assert.deepEqual(d.map((x) => x.code), ["other-agent", "no-agent", "sub-native"]);
-  assert.deepEqual(d[0], { code: "other-agent", agent: "woz:code", sessions: 2, latest: true });
+  assert.deepEqual(d.map((x) => x.code), ["other-agent", "sub-native"]); // latest has an agent: no "no-agent"
+  assert.deepEqual(diagnose([row(""), row("woz:code")]).map((x) => x.code), ["other-agent", "no-agent"]);
+  assert.deepEqual(d[0], { code: "other-agent", agent: "woz:code", sessions: 2, latest: true, installed: true });
+  assert.equal(diagnose(rows, (p) => p !== "woz")[0].code === "other-agent" && (diagnose(rows, (p) => p !== "woz")[0] as { installed: boolean }).installed, false);
   assert.equal(diagnose([row("token-eco:eco", 10)]).length, 0);
+  // sessions without agent: only flagged when the latest one has none
+  assert.deepEqual(diagnose([row("token-eco:eco"), row(""), row("")]).map((x) => x.code), []);
   assert.deepEqual(agentShare(rows)[0], { agent: "woz:code", sessions: 2 });
 });
 

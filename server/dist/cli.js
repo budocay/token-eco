@@ -741,23 +741,34 @@ function insights(f = {}) {
     levers: levers(list),
     compare: compare(rows),
     agents: agentShare(rows),
-    diagnosis: diagnose(rows),
+    diagnosis: diagnose(rows, installedPlugin()),
     sessions: rows.slice(0, 40)
   };
+}
+function installedPlugin() {
+  try {
+    const j = JSON.parse(readFileSync4(join5(process.env.CLAUDE_CONFIG_DIR ?? join5(homedir3(), ".claude"), "plugins", "installed_plugins.json"), "utf8"));
+    const names = new Set(Object.keys(j.plugins ?? j).map((k) => k.split("@")[0]));
+    return (p) => names.has(p);
+  } catch {
+    return () => true;
+  }
 }
 function agentShare(rows) {
   const m = /* @__PURE__ */ new Map();
   for (const r of rows) m.set(r.agent, (m.get(r.agent) ?? 0) + 1);
   return [...m].map(([agent, sessions]) => ({ agent, sessions })).sort((a, b) => b.sessions - a.sessions);
 }
-function diagnose(rows) {
+function diagnose(rows, installed = () => true) {
   const out = [];
   const recent2 = rows.slice(0, 10);
   const others = /* @__PURE__ */ new Map();
   for (const r of recent2) if (r.agent && !r.agent.startsWith("token-eco:")) others.set(r.agent, (others.get(r.agent) ?? 0) + 1);
-  for (const [agent, sessions] of others) out.push({ code: "other-agent", agent, sessions, latest: recent2[0]?.agent === agent });
+  for (const [agent, sessions] of others) {
+    out.push({ code: "other-agent", agent, sessions, latest: recent2[0]?.agent === agent, installed: installed(agent.split(":")[0]) });
+  }
   const none = recent2.filter((r) => !r.agent).length;
-  if (none) out.push({ code: "no-agent", sessions: none });
+  if (none && recent2[0] && !recent2[0].agent) out.push({ code: "no-agent", sessions: none });
   const sub = recent2.reduce((a, r) => ({ eco: a.eco + r.sub.eco, native: a.native + r.sub.native }), { eco: 0, native: 0 });
   if (sub.native > 50 && sub.native > 4 * sub.eco) out.push({ code: "sub-native", ...sub });
   return out;
@@ -994,7 +1005,10 @@ function summaryText(lang = uiLang()) {
         `  Co\xFBt       sous-agents ${p(b.cost ? b.costSub / b.cost : null)} \xB7 lectures cache ${p(b.cost ? b.kinds.read / b.cost : null)} \xB7 \xE9critures cache ${p(b.cost ? b.kinds.write / b.cost : null)} \xB7 sortie ${p(b.cost ? b.kinds.output / b.cost : null)}`
       ),
       `  ${L("Compare   ", "Comparaison")} ${verdict}`,
-      ...r.diagnosis.map((x) => "  \u26A0 " + (x.code === "other-agent" ? L(
+      ...r.diagnosis.map((x) => (x.code === "other-agent" && !x.installed ? "  \u2139 " : "  \u26A0 ") + (x.code === "other-agent" && !x.installed ? L(
+        `${x.agent} was the main agent in ${x.sessions} of the last 10 sessions; its plugin is no longer installed (nothing to do).`,
+        `${x.agent} \xE9tait l'agent principal dans ${x.sessions} des 10 derni\xE8res sessions ; son plugin n'est plus install\xE9 (rien \xE0 faire).`
+      ) : x.code === "other-agent" ? L(
         `Another main agent is active: ${x.agent} (${x.sessions} of the last 10 sessions${x.latest ? ", including the latest" : ""}); disable that plugin to use token-eco:eco.`,
         `Un autre agent principal est actif : ${x.agent} (${x.sessions} des 10 derni\xE8res sessions${x.latest ? ", dont la derni\xE8re" : ""}) ; d\xE9sactive ce plugin pour utiliser token-eco:eco.`
       ) : x.code === "no-agent" ? L(`${x.sessions} of the last 10 sessions ran without a custom main agent.`, `${x.sessions} des 10 derni\xE8res sessions sans agent principal personnalis\xE9.`) : L(`Subagents mostly use built-in tools (${x.native} vs ${x.eco} token-eco).`, `Sous-agents surtout sur les outils natifs (${x.native} contre ${x.eco} token-eco).`))),

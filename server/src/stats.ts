@@ -88,7 +88,10 @@ export function summaryText(lang: "en" | "fr" = uiLang()): string {
       L(`  Cost       subagents ${p(b.cost ? b.costSub / b.cost : null)} · cache reads ${p(b.cost ? b.kinds.read / b.cost : null)} · cache writes ${p(b.cost ? b.kinds.write / b.cost : null)} · output ${p(b.cost ? b.kinds.output / b.cost : null)}`,
         `  Coût       sous-agents ${p(b.cost ? b.costSub / b.cost : null)} · lectures cache ${p(b.cost ? b.kinds.read / b.cost : null)} · écritures cache ${p(b.cost ? b.kinds.write / b.cost : null)} · sortie ${p(b.cost ? b.kinds.output / b.cost : null)}`),
       `  ${L("Compare   ", "Comparaison")} ${verdict}`,
-      ...r.diagnosis.map((x) => "  ⚠ " + (x.code === "other-agent"
+      ...r.diagnosis.map((x) => (x.code === "other-agent" && !x.installed ? "  ℹ " : "  ⚠ ") + (x.code === "other-agent" && !x.installed
+        ? L(`${x.agent} was the main agent in ${x.sessions} of the last 10 sessions; its plugin is no longer installed (nothing to do).`,
+          `${x.agent} était l'agent principal dans ${x.sessions} des 10 dernières sessions ; son plugin n'est plus installé (rien à faire).`)
+        : x.code === "other-agent"
         ? L(`Another main agent is active: ${x.agent} (${x.sessions} of the last 10 sessions${x.latest ? ", including the latest" : ""}); disable that plugin to use token-eco:eco.`,
           `Un autre agent principal est actif : ${x.agent} (${x.sessions} des 10 dernières sessions${x.latest ? ", dont la dernière" : ""}) ; désactive ce plugin pour utiliser token-eco:eco.`)
         : x.code === "no-agent"

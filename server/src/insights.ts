@@ -167,9 +167,18 @@ export function insights(f: Filters = {}) {
     levers: levers(list),
     compare: compare(rows),
     agents: agentShare(rows),
-    diagnosis: diagnose(rows),
+    diagnosis: diagnose(rows, installedPlugin()),
     sessions: rows.slice(0, 40),
   };
+}
+
+/** Plugins listed in ~/.claude/plugins/installed_plugins.json (keys "name@marketplace"); unreadable → assume installed. */
+function installedPlugin(): (plugin: string) => boolean {
+  try {
+    const j = JSON.parse(readFileSync(join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "plugins", "installed_plugins.json"), "utf8"));
+    const names = new Set(Object.keys(j.plugins ?? j).map((k) => k.split("@")[0]));
+    return (p) => names.has(p);
+  } catch { return () => true; }
 }
 
 /** Main-thread agent of the sessions ("" = none / plugin agent not applied). */
@@ -181,17 +190,21 @@ export function agentShare(rows: SessionRow[]): { agent: string; sessions: numbe
 
 /** Why the coverage is low, as codes the dashboard / CLI turn into sentences (most recent sessions first). */
 export type Diagnosis =
-  | { code: "other-agent"; agent: string; sessions: number; latest: boolean }
+  | { code: "other-agent"; agent: string; sessions: number; latest: boolean; installed: boolean }
   | { code: "no-agent"; sessions: number }
   | { code: "sub-native"; native: number; eco: number };
-export function diagnose(rows: SessionRow[]): Diagnosis[] {
+/** installed(plugin): is that plugin still installed? An agent of a removed plugin is history, not a conflict. */
+export function diagnose(rows: SessionRow[], installed: (plugin: string) => boolean = () => true): Diagnosis[] {
   const out: Diagnosis[] = [];
   const recent = rows.slice(0, 10);
   const others = new Map<string, number>();
   for (const r of recent) if (r.agent && !r.agent.startsWith("token-eco:")) others.set(r.agent, (others.get(r.agent) ?? 0) + 1);
-  for (const [agent, sessions] of others) out.push({ code: "other-agent", agent, sessions, latest: recent[0]?.agent === agent });
+  for (const [agent, sessions] of others) {
+    out.push({ code: "other-agent", agent, sessions, latest: recent[0]?.agent === agent, installed: installed(agent.split(":")[0]) });
+  }
+  // Old sessions without agent are history: only worth a warning when the latest one has none.
   const none = recent.filter((r) => !r.agent).length;
-  if (none) out.push({ code: "no-agent", sessions: none });
+  if (none && recent[0] && !recent[0].agent) out.push({ code: "no-agent", sessions: none });
   const sub = recent.reduce((a, r) => ({ eco: a.eco + r.sub.eco, native: a.native + r.sub.native }), { eco: 0, native: 0 });
   if (sub.native > 50 && sub.native > 4 * sub.eco) out.push({ code: "sub-native", ...sub });
   return out;

@@ -240,6 +240,8 @@ const FR = {
   "Turns (+sub)": "Tours (+sub)", "Cost": "Coût", "Peak ctx": "Ctx max", "Cov. main": "Couv. princ.", "Cov. sub": "Couv. sub",
   "No Claude Code session log in this period.": "Aucun log de session Claude Code sur cette période.",
   "Agent": "Agent", ", including the latest": ", dont la dernière",
+  "{0} was the main agent in {1} of the last 10 sessions, but its plugin is no longer installed: nothing to do (close the Claude Code sessions opened before its removal).":
+    "{0} était l'agent principal dans {1} des 10 dernières sessions, mais son plugin n'est plus installé : rien à faire (fermer les sessions Claude Code ouvertes avant sa désinstallation).",
   "Another main agent is active: {0} ({1} of the last 10 sessions{2}). Two plugins set \"agent\" and only one wins: the token-eco tools are then barely used. Disable the other plugin (claude plugin disable …) to use token-eco:eco.":
     "Un autre agent principal est actif : {0} ({1} des 10 dernières sessions{2}). Deux plugins définissent \"agent\" et un seul l'emporte : les outils token-eco sont alors très peu utilisés. Désactive l'autre plugin (claude plugin disable …) pour utiliser token-eco:eco.",
   "{0} of the last 10 sessions ran without a custom main agent (plugin disabled at the time, older version, or claude -p).":
@@ -434,12 +436,12 @@ function renderSessions(s) {
     + (s.autoModel ? t(" · main model: {0}", label(s.autoModel)) : "");
   // Why the coverage is low (codes from insights.ts diagnose()).
   const D = {
-    "other-agent": (x) => t("Another main agent is active: {0} ({1} of the last 10 sessions{2}). Two plugins set \"agent\" and only one wins: the token-eco tools are then barely used. Disable the other plugin (claude plugin disable …) to use token-eco:eco.",
+    "other-agent": (x) => !x.installed ? t("{0} was the main agent in {1} of the last 10 sessions, but its plugin is no longer installed: nothing to do (close the Claude Code sessions opened before its removal).", `<code>${esc(x.agent)}</code>`, x.sessions) : t("Another main agent is active: {0} ({1} of the last 10 sessions{2}). Two plugins set \"agent\" and only one wins: the token-eco tools are then barely used. Disable the other plugin (claude plugin disable …) to use token-eco:eco.",
       `<code>${esc(x.agent)}</code>`, x.sessions, x.latest ? t(", including the latest") : ""),
     "no-agent": (x) => t("{0} of the last 10 sessions ran without a custom main agent (plugin disabled at the time, older version, or claude -p).", x.sessions),
     "sub-native": (x) => t("Subagents mostly use the built-in tools ({0} calls vs {1} token-eco): the hook redirects their whole-file reads (Read and cat) of big files.", nf.format(x.native), nf.format(x.eco)),
   };
-  $("diag").innerHTML = (s.diagnosis || []).map((x) => `<p class="note" style="border-left:3px solid ${x.code === "other-agent" ? "#ff7a8a" : "#ffb35c"};padding-left:10px">⚠ ${D[x.code]?.(x) ?? esc(x.code)}</p>`).join("");
+  $("diag").innerHTML = (s.diagnosis || []).map((x) => `<p class="note" style="border-left:3px solid ${x.code === "other-agent" && x.installed ? "#ff7a8a" : x.installed === false ? "var(--faint)" : "#ffb35c"};padding-left:10px">${x.installed === false ? "ℹ" : "⚠"} ${D[x.code]?.(x) ?? esc(x.code)}</p>`).join("");
   const c = s.coverage;
   $("cMain").textContent = share(c.mainPct);
   $("cMainSub").textContent = t("{0} token-eco / {1} built-in", nf.format(c.main.eco), nf.format(c.main.native));

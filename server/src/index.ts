@@ -13,7 +13,7 @@ import { execFile } from "node:child_process";
 import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const server = new McpServer({ name: "token-eco", version: "0.7.2" });
+const server = new McpServer({ name: "token-eco", version: "0.7.3" });
 
 /** Project root: CLAUDE_PROJECT_DIR when Claude Code provides it, else the cwd. */
 const ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
