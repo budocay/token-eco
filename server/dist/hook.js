@@ -33,7 +33,8 @@ var DEFAULT_CONFIG = {
   excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
   laterTurns: 10,
   port: 4777,
-  hook: { mode: "redirect", lineThreshold: 300 }
+  hook: { mode: "redirect", lineThreshold: 300 },
+  lang: "auto"
 };
 function readConfig() {
   const f = join(dataDir(), "config.json");
@@ -55,7 +56,8 @@ function readConfig() {
       excludeProjects: Array.isArray(c.excludeProjects) ? c.excludeProjects.filter((x) => typeof x === "string") : DEFAULT_CONFIG.excludeProjects,
       laterTurns: Number.isFinite(c.laterTurns) ? c.laterTurns : DEFAULT_CONFIG.laterTurns,
       port: Number.isFinite(c.port) ? c.port : DEFAULT_CONFIG.port,
-      hook
+      hook,
+      lang: c.lang === "en" || c.lang === "fr" ? c.lang : "auto"
     };
     if (old) writeFileSync(f, JSON.stringify(cfg, null, 2) + "\n");
     return cfg;

@@ -43,7 +43,8 @@ __export(config_exports, {
   nodeBinary: () => nodeBinary,
   readConfig: () => readConfig,
   saveAutoModel: () => saveAutoModel,
-  toDollars: () => toDollars
+  toDollars: () => toDollars,
+  uiLang: () => uiLang
 });
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -55,6 +56,10 @@ function dataDir() {
   const d = process.env.TOKEN_ECO_HOME ?? join(homedir(), ".token-eco");
   mkdirSync(d, { recursive: true });
   return d;
+}
+function uiLang(cfg = readConfig()) {
+  if (cfg.lang === "en" || cfg.lang === "fr") return cfg.lang;
+  return /^fr/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || "") ? "fr" : "en";
 }
 function readConfig() {
   const f = join(dataDir(), "config.json");
@@ -76,7 +81,8 @@ function readConfig() {
       excludeProjects: Array.isArray(c.excludeProjects) ? c.excludeProjects.filter((x) => typeof x === "string") : DEFAULT_CONFIG.excludeProjects,
       laterTurns: Number.isFinite(c.laterTurns) ? c.laterTurns : DEFAULT_CONFIG.laterTurns,
       port: Number.isFinite(c.port) ? c.port : DEFAULT_CONFIG.port,
-      hook
+      hook,
+      lang: c.lang === "en" || c.lang === "fr" ? c.lang : "auto"
     };
     if (old) writeFileSync(f, JSON.stringify(cfg, null, 2) + "\n");
     return cfg;
@@ -109,7 +115,8 @@ var init_config = __esm({
       excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
       laterTurns: 10,
       port: 4777,
-      hook: { mode: "redirect", lineThreshold: 300 }
+      hook: { mode: "redirect", lineThreshold: 300 },
+      lang: "auto"
     };
     AUTO_FILE = () => join(dataDir(), "auto-model.json");
   }
@@ -927,47 +934,79 @@ function statistics(q = {}) {
   };
 }
 var pct2 = (a) => a.native ? Math.round(a.saved / a.native * 100) : 0;
-function summaryText() {
+function summaryText(lang = uiLang()) {
+  const fr = lang === "fr", L = (en, f) => fr ? f : en;
   const s = statistics();
-  const line = (name, a) => `${name.padEnd(9)} ${formatTokens(a.saved).padStart(8)} tokens  ${formatUsd(a.dollars).padStart(9)}  (\u2212${pct2(a)}%, ${a.calls} call${a.calls === 1 ? "" : "s"})`;
+  const calls = (n) => fr ? `${n} appel${n > 1 ? "s" : ""}` : `${n} call${n === 1 ? "" : "s"}`;
+  const line = (name, a) => `${name.padEnd(12)} ${formatTokens(a.saved).padStart(8)} tokens  ${formatUsd(a.dollars).padStart(9)}  (\u2212${pct2(a)}%, ${calls(a.calls)})`;
   let real = [];
   try {
     const r = insights({ days: 30 });
     const p = (x) => x == null ? "\u2013" : x > 0 && x < 1e-3 ? "<0.1%" : `${+(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
-    const c = r.coverage, b = r.breakdown;
+    const c = r.coverage, b = r.breakdown, cmp = r.compare, nW = cmp.all.with.sessions, nO = cmp.all.without.sessions;
+    const verdict = nW < 3 || nO < 3 ? L(
+      `Not enough comparable sessions (${nW} with / ${nO} without, same project and model; 3 of each needed).`,
+      `Pas assez de sessions comparables (${nW} avec / ${nO} sans, m\xEAme projet et m\xEAme mod\xE8le ; il en faut 3 de chaque).`
+    ) : L(
+      `Cost per turn ${cmp.delta <= 0 ? "\u2212" : "+"}${Math.abs(Math.round(cmp.delta * 100))}% with token-eco (median, ${nW} vs ${nO} sessions). Tasks still differ: a trend, not a proof.`,
+      `Co\xFBt par tour ${cmp.delta <= 0 ? "\u2212" : "+"}${Math.abs(Math.round(cmp.delta * 100))}% avec token-eco (m\xE9diane, ${nW} vs ${nO} sessions). Les t\xE2ches diff\xE8rent : une tendance, pas une preuve.`
+    );
+    const notSet = L("not set", "non r\xE9gl\xE9");
     real = [
-      `Real sessions, last 30 days (${r.sessions.length} session(s), ${r.excluded} benchmark/temp hidden), ${formatUsd(b.cost)}:`,
-      `  Coverage   main thread ${p(c.mainPct)} (${c.main.eco} token-eco / ${c.main.native} built-in) \xB7 subagents ${p(c.subPct)} (${c.sub.eco} / ${c.sub.native})`,
-      `  Bash       ${p(c.bashPct)} compacted (${c.bash.compacted} of ${c.bash.total})`,
-      `  Avoided    ${formatUsd(r.avoided.usd)} = ${p(r.avoided.shareOfCost)} of the bill (est., each session's own model)`,
-      `  Cost       subagents ${p(b.cost ? b.costSub / b.cost : null)} \xB7 cache reads ${p(b.cost ? b.kinds.read / b.cost : null)} \xB7 cache writes ${p(b.cost ? b.kinds.write / b.cost : null)} \xB7 output ${p(b.cost ? b.kinds.output / b.cost : null)}`,
-      `  Compare    ${r.compare.verdict}`,
-      'Levers (measured; setting in ~/.claude/settings.json "env"):',
-      `  Context above 300K (main)     ${formatUsd(r.levers.compaction.over300k).padStart(10)}  CLAUDE_CODE_AUTO_COMPACT_WINDOW = ${r.levers.compaction.setting ?? "not set (try 300k)"}`,
-      `  Subagents on ${r.levers.subagents.cheaperModel.replace("claude-", "")} would save ${formatUsd(r.levers.subagents.saving).padStart(6)}  CLAUDE_CODE_SUBAGENT_MODEL = ${r.levers.subagents.setting ?? "not set"}`,
-      `  Cache expired (${r.levers.rebuilds.count} rewrites)   ${formatUsd(r.levers.rebuilds.cost).padStart(10)}  cache TTL = ${r.levers.rebuilds.setting ?? "5m (try CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h)"}`,
+      L(
+        `Real sessions, last 30 days (${r.sessions.length} session(s), ${r.excluded} benchmark/temp hidden), ${formatUsd(b.cost)}:`,
+        `Sessions r\xE9elles, 30 derniers jours (${r.sessions.length} session(s), ${r.excluded} benchmark/temp masqu\xE9e(s)), ${formatUsd(b.cost)} :`
+      ),
+      L(
+        `  Coverage   main thread ${p(c.mainPct)} (${c.main.eco} token-eco / ${c.main.native} built-in) \xB7 subagents ${p(c.subPct)} (${c.sub.eco} / ${c.sub.native})`,
+        `  Couverture fil principal ${p(c.mainPct)} (${c.main.eco} token-eco / ${c.main.native} natifs) \xB7 sous-agents ${p(c.subPct)} (${c.sub.eco} / ${c.sub.native})`
+      ),
+      L(`  Bash       ${p(c.bashPct)} compacted (${c.bash.compacted} of ${c.bash.total})`, `  Bash       ${p(c.bashPct)} compact\xE9 (${c.bash.compacted} sur ${c.bash.total})`),
+      L(
+        `  Avoided    ${formatUsd(r.avoided.usd)} = ${p(r.avoided.shareOfCost)} of the bill (est., each session's own model)`,
+        `  \xC9vit\xE9      ${formatUsd(r.avoided.usd)} = ${p(r.avoided.shareOfCost)} de la facture (est., mod\xE8le de chaque session)`
+      ),
+      L(
+        `  Cost       subagents ${p(b.cost ? b.costSub / b.cost : null)} \xB7 cache reads ${p(b.cost ? b.kinds.read / b.cost : null)} \xB7 cache writes ${p(b.cost ? b.kinds.write / b.cost : null)} \xB7 output ${p(b.cost ? b.kinds.output / b.cost : null)}`,
+        `  Co\xFBt       sous-agents ${p(b.cost ? b.costSub / b.cost : null)} \xB7 lectures cache ${p(b.cost ? b.kinds.read / b.cost : null)} \xB7 \xE9critures cache ${p(b.cost ? b.kinds.write / b.cost : null)} \xB7 sortie ${p(b.cost ? b.kinds.output / b.cost : null)}`
+      ),
+      `  ${L("Compare   ", "Comparaison")} ${verdict}`,
+      L('Levers (measured; setting in ~/.claude/settings.json "env"):', 'Leviers (mesur\xE9s ; r\xE9glage dans ~/.claude/settings.json "env") :'),
+      `  ${L("Context above 300K (main)    ", "Contexte au-del\xE0 de 300K     ")} ${formatUsd(r.levers.compaction.over300k).padStart(10)}  CLAUDE_CODE_AUTO_COMPACT_WINDOW = ${r.levers.compaction.setting ?? L("not set (try 300k)", "non r\xE9gl\xE9 (essayer 300k)")}`,
+      `  ${L(`Subagents on ${r.levers.subagents.cheaperModel.replace("claude-", "")} would save`, `Sous-agents en ${r.levers.subagents.cheaperModel.replace("claude-", "")} : \xE9conomie`)} ${formatUsd(r.levers.subagents.saving).padStart(6)}  CLAUDE_CODE_SUBAGENT_MODEL = ${r.levers.subagents.setting ?? notSet}`,
+      `  ${L(`Cache expired (${r.levers.rebuilds.count} rewrites)  `, `Cache expir\xE9 (${r.levers.rebuilds.count} r\xE9\xE9critures)`)} ${formatUsd(r.levers.rebuilds.cost).padStart(10)}  cache TTL = ${r.levers.rebuilds.setting ?? L("5m (try CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h)", "5m (essayer CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h)")}`,
       ""
     ];
   } catch {
   }
+  const { refused, fallbacks } = s.redirections.total;
   return [
     ...real,
-    "token-eco \u2014 ESTIMATED tokens avoided per call (vs the assumed built-in call; extra turns not counted)",
-    line("Today", s.today),
-    line("7 days", s.week),
+    L(
+      "token-eco \u2014 ESTIMATED tokens avoided per call (vs the assumed built-in call; extra turns not counted)",
+      "token-eco \u2014 tokens \xE9vit\xE9s par appel, ESTIM\xC9S (vs l'appel natif suppos\xE9 ; tours en plus non compt\xE9s)"
+    ),
+    line(L("Today", "Aujourd'hui"), s.today),
+    line(L("7 days", "7 jours"), s.week),
     line("Total", s.total),
     "",
-    "By tool:",
-    ...s.byTool.map((o) => `  ${o.key.padEnd(16)} ${formatTokens(o.saved).padStart(8)} tokens  (\u2212${pct2(o)}%, ${o.calls} call${o.calls === 1 ? "" : "s"})`),
+    L("By tool:", "Par outil :"),
+    ...s.byTool.map((o) => `  ${o.key.padEnd(16)} ${formatTokens(o.saved).padStart(8)} tokens  (\u2212${pct2(o)}%, ${calls(o.calls)})`),
     "",
-    "By project:",
+    L("By project:", "Par projet :"),
     ...s.byProject.slice(0, 8).map((o) => `  ${(o.key.split(/[\\/]/).filter(Boolean).pop() ?? o.key).padEnd(16)} ${formatTokens(o.saved).padStart(8)} tokens  ${formatUsd(o.dollars).padStart(9)}`),
     "",
-    (({ refused, fallbacks }) => `Hook (total): ${refused} built-in Read/Grep redirected, ${fallbacks} allowed on retry`)(s.redirections.total),
+    L(
+      `Hook (total): ${refused} built-in Read/Grep redirected, ${fallbacks} allowed on retry`,
+      `Hook (total) : ${refused} Read/Grep natifs redirig\xE9s, ${fallbacks} autoris\xE9s \xE0 la relance`
+    ),
     "",
-    `Pricing: ${s.pricing.label}, $${s.pricing.rate.toFixed(2)}/MTok avoided (${s.pricing.formula}; prices checked ${s.pricing.checked}).`,
-    `Change "model" / "laterTurns" in ~/.token-eco/config.json.`,
-    s.estimate
+    L(
+      `Pricing: ${s.pricing.label}, $${s.pricing.rate.toFixed(2)}/MTok avoided (${s.pricing.formula}; prices checked ${s.pricing.checked}).`,
+      `Tarifs : ${s.pricing.label}, $${s.pricing.rate.toFixed(2)}/MTok \xE9vit\xE9 (tokens \xE9conomis\xE9s \xD7 (\xE9criture cache 5 min + ${s.pricing.laterTurns} tours suivants \xD7 lecture cache) par MTok ; prix v\xE9rifi\xE9s le ${s.pricing.checked}).`
+    ),
+    L(`Change "model" / "laterTurns" / "lang" in ~/.token-eco/config.json.`, `Modifier "model" / "laterTurns" / "lang" dans ~/.token-eco/config.json.`),
+    L(s.estimate, `Estimations : 1 token \u2248 ${CHARS_PER_TOKEN} caract\xE8res ; \xAB natif \xBB = taille suppos\xE9e de la sortie de l'outil int\xE9gr\xE9 \xE9quivalent.`)
   ].join("\n");
 }
 
@@ -1066,9 +1105,10 @@ switch (cmd) {
   }
   case "statusline": {
     const { aggregate: aggregate2 } = await Promise.resolve().then(() => (init_db(), db_exports));
-    const { toDollars: toDollars2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+    const { toDollars: toDollars2, uiLang: uiLang2 } = await Promise.resolve().then(() => (init_config(), config_exports));
     const d = aggregate2("day"), t = aggregate2("total");
-    console.log(`token-eco \u2193 today ${formatTokens(d.saved)} tok (${formatUsd(toDollars2(d.saved))}) \xB7 total ${formatTokens(t.saved)} tok (${formatUsd(toDollars2(t.saved))})`);
+    const today = uiLang2() === "fr" ? "aujourd'hui" : "today";
+    console.log(`token-eco \u2193 ${today} ${formatTokens(d.saved)} tok (${formatUsd(toDollars2(d.saved))}) \xB7 total ${formatTokens(t.saved)} tok (${formatUsd(toDollars2(t.saved))})`);
     break;
   }
   case "serve":

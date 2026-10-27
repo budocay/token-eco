@@ -1,5 +1,7 @@
 # token-eco
 
+*[Version française](README.fr.md)*
+
 A personal Claude Code plugin that tries to cut token usage (see **Benchmarks** for what it does and does not
 achieve). It brings:
 
@@ -62,7 +64,7 @@ Restart Claude Code and check with `/mcp` that the `token-eco` server is connect
 ## Usage
 
 - `/eco-stats`: terminal summary: per-call estimates (today, 7 days, total, per tool, per project) and the **real
-  sessions** of the last 7 days from the Claude Code logs (tokens per turn and per session, with vs without token-eco).
+  sessions** of the last 30 days from the Claude Code logs (tokens per turn and per session, with vs without token-eco).
 - `/eco-dashboard`: starts the dashboard on `http://127.0.0.1:4777` and opens the browser.
 - `/eco-statusline`: savings in the Claude Code status line.
 - Outside Claude Code: `node server/dist/cli.js <stats|statusline|dashboard|serve|stop>`.
@@ -72,7 +74,10 @@ model selector for pricing, KPIs (per-call estimates: dollars, tokens avoided, r
 card (actual tokens per turn / per session and cost from the Claude Code logs, with vs without token-eco, recent
 sessions), daily chart stacked by project (or by tool inside a
 project) with a clickable legend, per-tool and per-project bars, pricing card, hook counters, filterable recent calls.
-Light/dark/auto theme. Listens on 127.0.0.1 only and rejects foreign `Host` headers.
+A project is its main git repository: sub-folders and git worktrees are grouped under it, and the project view has a
+**Worktrees & folders** card; benchmark/temp folders (`excludeProjects`) are kept out of the sidebar.
+Light/dark/auto theme, **EN/FR** language switch (defaults to the browser language). Listens on 127.0.0.1 only and
+rejects foreign `Host` headers.
 
 ## Pricing and estimates
 
@@ -87,10 +92,13 @@ Light/dark/auto theme. Listens on 127.0.0.1 only and rejects foreign `Host` head
 ## Data and configuration
 
 Everything lives in `~/.token-eco/` (override with `TOKEN_ECO_HOME`):
-- `eco.db` (SQLite): one row per call (`ts`, `project`, `tool`, `returned_tokens`, `native_tokens_est`, `duration_ms`,
-  `details`) and the hook `redirections`. Pre-0.4 databases are migrated in place automatically.
-- `config.json`: `model` (a key of `pricing.ts`, e.g. `claude-opus-5.5`), `laterTurns`, `port`,
-  `hook: { mode: "redirect" | "off", lineThreshold: 300 }`. Pre-0.4 keys are migrated automatically.
+- `eco.db` (SQLite): one row per call (`ts`, `project` = main git repo, `workdir` = exact folder, `tool`,
+  `returned_tokens`, `native_tokens_est`, `duration_ms`, `details`) and the hook `redirections`. Older databases are
+  migrated in place automatically.
+- `projects.json`: cache folder → main git repo.
+- `config.json`: `model` (a key of `pricing.ts`, e.g. `claude-opus-5.5`, or `auto`), `laterTurns`, `port`,
+  `excludeProjects`, `hook: { mode: "redirect" | "off", lineThreshold: 300 }`, `lang` (`auto` | `en` | `fr`: language
+  of `/eco-stats` and the status line; `auto` follows `LANG`). Older keys are migrated automatically.
 
 ## Benchmarks
 

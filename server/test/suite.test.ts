@@ -234,7 +234,8 @@ test("db: recording and aggregates", () => {
   const s = statistics();
   // Sonnet 5.5: 5-min cache write $2.50 + 10 later turns × cache read $0.10 = $3.50 per MTok saved.
   assert.ok(Math.abs(s.total.dollars - (1500 / 1e6) * 3.5) < 1e-12);
-  assert.match(summaryText(), /ESTIMATED[\s\S]*Total\s+1\.5K tokens/);
+  assert.match(summaryText("en"), /ESTIMATED[\s\S]*Total\s+1\.5K tokens/);
+  assert.match(summaryText("fr"), /ESTIMÉS[\s\S]*Aujourd'hui[\s\S]*Total\s+1\.5K tokens/);
   const p = statistics({ project: "/p/one", days: 7 });
   assert.equal(p.range.saved, 1000);
   assert.equal(p.stack.by, "tool");

@@ -45,9 +45,10 @@ switch (cmd) {
   case "statusline": {
     // Claude Code status line (stdin = session info, ignored): one short line.
     const { aggregate } = await import("./db.ts");
-    const { toDollars } = await import("./config.ts");
+    const { toDollars, uiLang } = await import("./config.ts");
     const d = aggregate("day"), t = aggregate("total");
-    console.log(`token-eco ↓ today ${formatTokens(d.saved)} tok (${formatUsd(toDollars(d.saved))}) · total ${formatTokens(t.saved)} tok (${formatUsd(toDollars(t.saved))})`);
+    const today = uiLang() === "fr" ? "aujourd'hui" : "today";
+    console.log(`token-eco ↓ ${today} ${formatTokens(d.saved)} tok (${formatUsd(toDollars(d.saved))}) · total ${formatTokens(t.saved)} tok (${formatUsd(toDollars(t.saved))})`);
     break;
   }
 

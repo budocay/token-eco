@@ -95,6 +95,7 @@ td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
     </div>
     <div><p class="label">Projects</p><nav class="nav" id="projects"></nav></div>
     <div class="foot">
+      <div class="seg" id="langs"><button data-l="en">EN</button><button data-l="fr">FR</button></div>
       <div class="seg" id="themes"><button data-t="auto">Auto</button><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
       <div class="live"><span class="dot"></span><span id="updated">connecting…</span></div>
       <button class="link" id="stop">■ Stop dashboard</button>
@@ -162,13 +163,118 @@ td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const nf = new Intl.NumberFormat("en-US");
-const tok = (n) => { const a = Math.abs(n); return a < 1000 ? nf.format(Math.round(n)) : a < 1e6 ? `${+(n / 1e3).toFixed(1)}K` : `${+(n / 1e6).toFixed(2)}M`; };
-const usd = (d) => d > 0 && d < 0.01 ? "<$0.01" : `$${d.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// --- i18n: English is the source text (and the fallback), FR maps it. t("… {0} …", x) fills placeholders. ---
+const FR = {
+  "token-eco · savings": "token-eco · économies", "local savings board": "tableau local des économies", "Projects": "Projets",
+  "Auto": "Auto", "Light": "Clair", "Dark": "Sombre", "connecting…": "connexion…", "■ Stop dashboard": "■ Arrêter le dashboard",
+  "All projects": "Tous les projets", "7d": "7 j", "30d": "30 j", "90d": "90 j", "All": "Tout",
+  "Model used to price the saved tokens": "Modèle utilisé pour chiffrer les tokens économisés",
+  "Worktrees & folders": "Worktrees et dossiers",
+  "where the calls came from · tokens avoided (est.) · reduction · calls": "d'où viennent les appels · tokens évités (est.) · réduction · appels",
+  "Real sessions": "Sessions réelles",
+  "Claude Code logs · everything the model processed, subagents included": "logs Claude Code · tout ce que le modèle a traité, sous-agents compris",
+  "Only sessions of this model": "Seulement les sessions de ce modèle", "benchmarks / temp dirs": "benchmarks / dossiers temporaires",
+  "Coverage · main thread": "Couverture · fil principal", "Coverage · subagents": "Couverture · sous-agents",
+  "Bash output compacted": "Sorties Bash compactées", "Avoided vs real bill (est.)": "Évité vs facture réelle (est.)",
+  "Where the money goes": "Où part l'argent", "Most used tools": "Outils les plus utilisés",
+  "calls · sub: = inside subagents": "appels · sub: = dans les sous-agents", "Levers": "Leviers",
+  "biggest cost drivers in your logs, and the Claude Code setting (settings.json \"env\") that acts on each":
+    "principaux postes de coût dans tes logs, et le réglage Claude Code (settings.json \"env\") qui agit sur chacun",
+  "With vs without token-eco": "Avec vs sans token-eco",
+  "same project and model only · medians per turn (subagent turns included)": "même projet et même modèle uniquement · médianes par tour (tours des sous-agents inclus)",
+  "Sessions": "Sessions", "coverage = token-eco share of file reads / searches / edits": "couverture = part de token-eco dans les lectures / recherches / éditions de fichiers",
+  "Coverage counts token-eco read/search/edit against built-in Read/Grep/Glob/Edit/MultiEdit. Bash compacted and \"avoided\" come from the token-eco calls recorded in the same project during the session (no session id in that table: parallel sessions of one project share them). \"Avoided\" is priced with each session's own model.":
+    "La couverture compte les read/search/edit de token-eco face aux Read/Grep/Glob/Edit/MultiEdit natifs. « Bash compacté » et « évité » viennent des appels token-eco enregistrés dans le même projet pendant la session (pas d'identifiant de session dans cette table : des sessions parallèles d'un même projet se les partagent). « Évité » est chiffré avec le modèle de chaque session.",
+  "Per-call estimates": "Estimations par appel", "what each token-eco call returned vs the assumed built-in call": "ce que chaque appel token-eco a renvoyé vs l'appel natif supposé",
+  "Avoided per call (est.)": "Évité par appel (est.)", "Tokens avoided (est.)": "Tokens évités (est.)", "Reduction": "Réduction", "Tool calls": "Appels d'outils",
+  "By tool": "Par outil", "tokens avoided (est.) · reduction · calls": "tokens évités (est.) · réduction · appels", "Pricing": "Tarifs", "Hook": "Hook",
+  "built-in calls redirected (all projects)": "appels natifs redirigés (tous les projets)",
+  "Refused = a full Read / content Grep was answered with an outline or a hint instead. Retry = the agent still asked for the original (allowed the second time).":
+    "Refusé = un Read complet / un Grep de contenu a reçu un plan ou une indication à la place. Relance = l'agent a quand même redemandé l'original (autorisé la deuxième fois).",
+  "Recent calls": "Appels récents", "Filter: tool, project, file…": "Filtrer : outil, projet, fichier…",
+  "Except \"Real sessions\", all figures are per-call estimates: what each token-eco call returned vs the assumed size of the equivalent built-in call (e.g. a whole-file Read). The real agent often reads more sparingly, and extra turns are not counted there: use \"Real sessions\" for actual usage.":
+    "Hors « Sessions réelles », tous les chiffres sont des estimations par appel : ce que chaque appel token-eco a renvoyé vs la taille supposée de l'appel natif équivalent (ex. un Read du fichier entier). L'agent réel lit souvent plus sobrement, et les tours en plus n'y sont pas comptés : voir « Sessions réelles » pour l'usage réel.",
+  // dynamic
+  "just now": "à l'instant", "{0} min ago": "il y a {0} min", "{0} h ago": "il y a {0} h", "{0} days ago": "il y a {0} jours",
+  "stopped": "arrêté", "updated {0}": "mis à jour {0}", "server unreachable": "serveur injoignable", "Nothing yet for this scope.": "Rien pour l'instant ici.",
+  "(root)": "(racine)", "Tokens avoided per day (est.), by project": "Tokens évités par jour (est.), par projet",
+  "Tokens avoided per day (est.), by tool": "Tokens évités par jour (est.), par outil", "{0} active day(s) · {1} tokens": "{0} jour(s) actif(s) · {1} tokens",
+  "When": "Quand", "Tool": "Outil", "Project": "Projet", "Detail": "Détail", "Returned": "Renvoyé", "Native (est.)": "Natif (est.)", "Avoided": "Évité",
+  "No calls match.": "Aucun appel ne correspond.", "{0} · since {1} · last active {2} · mostly {3}": "{0} · depuis le {1} · actif {2} · surtout {3}",
+  "{0} project(s) · last {1} days": "{0} projet(s) · {1} derniers jours", "{0} project(s) · all time": "{0} projet(s) · depuis le début",
+  "today {0} · 7d {1}": "aujourd'hui {0} · 7 j {1}", "{0} sent instead of {1}": "{0} envoyés au lieu de {1}", "vs built-in tool output": "vs sortie de l'outil natif",
+  "today {0} · total {1}": "aujourd'hui {0} · total {1}", "Days": "Jours", "tokens avoided (est.), most recent first": "tokens évités (est.), du plus récent au plus ancien",
+  "By project": "Par projet", "$/MTok · checked {0}": "$/MTok · vérifié le {0}", "Input": "Entrée", "Cache write (5 min)": "Écriture cache (5 min)",
+  "Cache read": "Lecture cache", "Output": "Sortie", "Anthropic pricing": "tarifs Anthropic",
+  "1 avoided token is worth {0} here: saved tokens × (5-min cache write + {1} later turns × cache read) per MTok. A tool result is written to the prompt cache once, then re-read on every later turn. Source: {2}.":
+    "1 token évité vaut ici {0} : tokens économisés × (écriture cache 5 min + {1} tours suivants × lecture cache) par MTok. Un résultat d'outil est écrit une fois dans le cache du prompt, puis relu à chaque tour suivant. Source : {2}.",
+  "refused, outline given": "refusés, plan fourni", "retried": "relancés",
+  "All models": "Tous les modèles", "{0} session(s) shown, last {1} days": "{0} session(s) affichée(s), {1} derniers jours",
+  " · {0} benchmark/temp session(s) hidden (excludeProjects in ~/.token-eco/config.json)": " · {0} session(s) de benchmark/temporaire(s) masquée(s) (excludeProjects dans ~/.token-eco/config.json)",
+  " · main model: {0}": " · modèle principal : {0}", "{0} token-eco / {1} built-in": "{0} token-eco / {1} natifs",
+  "{0} of {1} Bash calls": "{0} sur {1} appels Bash", "{0} of {1} · {2} tokens": "{0} de {1} · {2} tokens", "{0} over {1} turns": "{0} sur {1} tours",
+  "in subagents ({0}, {1} turns)": "dans les sous-agents ({0}, {1} tours)", "main thread ({0}, {1} turns)": "fil principal ({0}, {1} tours)",
+  "Cache reads (context re-read every turn)": "Lectures cache (contexte relu à chaque tour)", "Cache writes (new context)": "Écritures cache (nouveau contexte)",
+  "Output (model writing)": "Sortie (le modèle écrit)", "Uncached input": "Entrée hors cache", "No tool call.": "Aucun appel d'outil.",
+  "set: {0}": "réglé : {0}", "not set": "non réglé", "Driver": "Poste", "Measured": "Mesuré", "Setting": "Réglage",
+  "Huge contexts (main thread)": "Contextes énormes (fil principal)", "{0} above 300K": "{0} au-delà de 300K", "{0} above 200K": "{0} au-delà de 200K",
+  "Every turn re-reads the whole context; median peak {0}. Compacting earlier (or /clear between tasks) cuts it.":
+    "Chaque tour relit tout le contexte ; pic médian {0}. Compacter plus tôt (ou /clear entre deux tâches) le réduit.",
+  "Subagent model": "Modèle des sous-agents", "{0} saved": "{0} économisés", "with {0}": "avec {0}", "No subagent.": "Aucun sous-agent.",
+  "Cache expired during long commands": "Cache expiré pendant les longues commandes", "{0} rewrites": "{0} réécritures",
+  "Context rewritten after >5 min without a reply (tests, builds). A 1-hour cache avoids most of it, but its writes cost 2× input instead of 1.25×.":
+    "Contexte réécrit après plus de 5 min sans réponse (tests, builds). Un cache d'1 heure en évite l'essentiel, mais ses écritures coûtent 2× l'entrée au lieu de 1,25×.",
+  "Starting context": "Contexte de départ", "per 10K tokens less": "par tranche de 10K tokens en moins",
+  "System prompt, tools, skills, CLAUDE.md: {0} (main), {1} per subagent ({2} started).": "Prompt système, outils, skills, CLAUDE.md : {0} (principal), {1} par sous-agent ({2} lancés).",
+  "disable unused plugins / skills": "désactiver les plugins / skills inutilisés",
+  "Measured over the sessions shown, before any change: once a setting is on, new sessions should make its figure shrink.":
+    "Mesuré sur les sessions affichées, avant tout changement : une fois un réglage activé, les nouvelles sessions devraient faire baisser son chiffre.",
+  "Not enough comparable sessions ({0} with / {1} without, same project and model; 3 of each needed).":
+    "Pas assez de sessions comparables ({0} avec / {1} sans, même projet et même modèle ; il en faut 3 de chaque).",
+  "Cost per turn {0} with token-eco (median, {1} vs {2} sessions). Tasks still differ: a trend, not a proof.":
+    "Coût par tour {0} avec token-eco (médiane, {1} vs {2} sessions). Les tâches diffèrent : une tendance, pas une preuve.",
+  "Model": "Modèle", "$ / turn": "$ / tour", "Tokens / turn": "Tokens / tour", "Peak context": "Contexte max", "$ / session": "$ / session",
+  "with": "avec", "without": "sans", "No project has sessions both with and without token-eco on the same model yet.":
+    "Aucun projet n'a encore de sessions avec et sans token-eco sur le même modèle.",
+  "Turns (+sub)": "Tours (+sub)", "Cost": "Coût", "Peak ctx": "Ctx max", "Cov. main": "Couv. princ.", "Cov. sub": "Couv. sub",
+  "No Claude Code session log in this period.": "Aucun log de session Claude Code sur cette période.",
+};
+let lang = localStorage.getItem("te-lang") || ((navigator.language || "en").startsWith("fr") ? "fr" : "en");
+const t = (s, ...a) => (lang === "fr" ? FR[s] ?? s : s).replace(/\{(\d)\}/g, (_, i) => a[i]);
+let loc = lang === "fr" ? "fr-FR" : "en-US", nf = new Intl.NumberFormat(loc);
+// Static page text: every text node / title / placeholder whose English text is in FR (original kept for switching back).
+const orig = new WeakMap();
+function translatePage() {
+  document.documentElement.lang = lang; document.title = t("token-eco · savings");
+  const w = document.createTreeWalker(document.querySelector(".app"), NodeFilter.SHOW_TEXT);
+  for (let n; (n = w.nextNode());) {
+    if (!orig.has(n)) {
+      const v = n.nodeValue, k = v.replace(/\s+/g, " ").trim(); if (!FR[k]) continue;
+      orig.set(n, { k, pre: v.match(/^\s*/)[0] ? " " : "", post: v.match(/\s*$/)[0] ? " " : "" });
+    }
+    const o = orig.get(n); n.nodeValue = o.pre + t(o.k) + o.post;
+  }
+  for (const el of document.querySelectorAll("[title],[placeholder]")) for (const at of ["title", "placeholder"]) {
+    if (!el.hasAttribute(at)) continue;
+    const key = `${at}0`; if (!(key in el.dataset)) { if (!FR[el.getAttribute(at)]) continue; el.dataset[key] = el.getAttribute(at); }
+    el.setAttribute(at, t(el.dataset[key]));
+  }
+}
+function setLang(l) {
+  lang = l; localStorage.setItem("te-lang", l); loc = l === "fr" ? "fr-FR" : "en-US"; nf = new Intl.NumberFormat(loc);
+  for (const b of $("langs").children) b.classList.toggle("on", b.dataset.l === l);
+  translatePage();
+  if (data) render();
+  if (lastSessions) renderSessions(lastSessions);
+}
+const tok = (n) => { const a = Math.abs(n), f = (x, d) => (+x.toFixed(d)).toLocaleString(loc);
+  return a < 1000 ? nf.format(Math.round(n)) : a < 1e6 ? `${f(n / 1e3, 1)}K` : `${f(n / 1e6, 2)}M`; };
+const money = (d) => d.toLocaleString(loc, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const usd = (d) => lang === "fr" ? (d > 0 && d < 0.01 ? "<0,01 $" : `${money(d)} $`) : (d > 0 && d < 0.01 ? "<$0.01" : `$${money(d)}`);
 const pct = (a) => a.native ? Math.round(a.saved / a.native * 100) : 0;
 const base = (p) => String(p).split(/[\\/]/).filter(Boolean).pop() || String(p);
-const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 90 ? "just now" : s < 5400 ? `${Math.round(s / 60)} min ago`
-  : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
+const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 90 ? t("just now") : s < 5400 ? t("{0} min ago", Math.round(s / 60))
+  : s < 129600 ? t("{0} h ago", Math.round(s / 3600)) : t("{0} days ago", Math.round(s / 86400)); };
 const PALETTE = ["#5fb8ff", "#5fe08a", "#ffb35c", "#d38bff", "#ff7a8a", "#f1d36b", "#5ce0d0", "#9aa3ff", "#ff9e6b", "#b7e05f"];
 const store = (k, v) => v === undefined ? localStorage.getItem(`te-${k}`) : localStorage.setItem(`te-${k}`, v);
 const state = { project: store("project") || "", days: Number(store("days") ?? 30), model: store("model") || "", q: "", hidden: new Set(),
@@ -185,7 +291,8 @@ $("themes").onclick = (e) => e.target.dataset.t && theme(e.target.dataset.t);
 $("periods").onclick = (e) => { if (e.target.dataset.d) { state.days = Number(e.target.dataset.d); store("days", state.days); load(); } };
 $("model").onchange = (e) => { state.model = e.target.value; store("model", state.model); load(); };
 $("q").oninput = (e) => { state.q = e.target.value.toLowerCase(); renderRecent(); };
-$("stop").onclick = async () => { await fetch("/api/stop", { method: "POST" }).catch(() => {}); $("updated").textContent = "stopped"; clearInterval(timer); };
+$("stop").onclick = async () => { await fetch("/api/stop", { method: "POST" }).catch(() => {}); $("updated").textContent = t("stopped"); clearInterval(timer); };
+$("langs").onclick = (e) => e.target.dataset.l && setLang(e.target.dataset.l);
 function pick(project) { state.project = project; state.hidden.clear(); store("project", project); load(); }
 
 function bars(el, list, label, color) {
@@ -193,7 +300,7 @@ function bars(el, list, label, color) {
   el.innerHTML = list.length ? list.slice(0, 8).map((a) => `<div class="row"><div class="t"><b title="${esc(a.key)}">${esc(label(a.key))}</b>
     <em>${tok(a.saved)} · −${pct(a)}% · ${nf.format(a.calls)}</em></div>
     <div class="bar"><i style="width:${Math.max(2, a.saved / max * 100)}%;${color ? `--c:${color(a.key)}` : ""}"></i></div></div>`).join("")
-    : `<div class="empty">Nothing yet for this scope.</div>`;
+    : `<div class="empty">${t("Nothing yet for this scope.")}</div>`;
 }
 
 function dayKeys(n) {
@@ -230,8 +337,8 @@ function chart() {
     svg += `<text x="${i * step + step / 2}" y="${H - 4}" font-size="10" fill="var(--faint)" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">${days[i].slice(5)}</text>`;
   }
   $("chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${svg}</svg>`;
-  $("chartTitle").textContent = `Tokens avoided per day (est.), by ${data.stack.by}`;
-  $("chartInfo").textContent = `${totals.filter(Boolean).length} active day(s) · ${tok(totals.reduce((a, b) => a + b, 0))} tokens`;
+  $("chartTitle").textContent = t(`Tokens avoided per day (est.), by ${data.stack.by}`);
+  $("chartInfo").textContent = t("{0} active day(s) · {1} tokens", totals.filter(Boolean).length, tok(totals.reduce((a, b) => a + b, 0)));
   $("legend").innerHTML = keys.map((k) => `<button data-k="${esc(k)}" class="${state.hidden.has(k) ? "off" : ""}" style="--c:${keyColor(k)}">
     <i></i>${esc(data.stack.by === "project" ? base(k) : k)}</button>`).join("");
 }
@@ -241,60 +348,60 @@ $("legend").onclick = (e) => { const b = e.target.closest("button"); if (!b) ret
 function renderRecent() {
   const list = data.recent.filter((x) => !state.q || `${x.tool} ${x.project} ${x.details ?? ""}`.toLowerCase().includes(state.q));
   $("recent").innerHTML = list.length ? `<table><colgroup><col style="width:120px"><col style="width:90px"><col><col><col style="width:80px"><col style="width:80px"><col style="width:80px"></colgroup>
-    <tr><th>When</th><th>Tool</th><th>Project</th><th>Detail</th><th class="n">Returned</th><th class="n">Native (est.)</th><th class="n">Avoided</th></tr>
+    <tr>${["When", "Tool", "Project", "Detail"].map((h) => `<th>${t(h)}</th>`).join("")}${["Returned", "Native (est.)", "Avoided"].map((h) => `<th class="n">${t(h)}</th>`).join("")}</tr>
     ${list.map((x) => { const g = x.native - x.returned; let det = ""; try { const o = JSON.parse(x.details || "{}"); det = o.file ?? o.pattern ?? o.command ?? ""; } catch {}
       return `<tr><td title="${esc(x.ts)}">${esc(ago(x.ts))}</td><td>${esc(x.tool)}</td>
       <td title="${esc(x.project)}"><span class="tag" style="--c:${colorOf(x.project)}"><i></i>${esc(base(x.project))}</span></td><td title="${esc(det)}">${esc(det)}</td>
       <td class="n">${tok(x.returned)}</td><td class="n">${tok(x.native)}</td><td class="n ${g >= 0 ? "ok" : "ko"}">${g >= 0 ? "−" : "+"}${tok(Math.abs(g))}</td></tr>`; }).join("")}</table>`
-    : `<div class="empty">No calls match.</div>`;
+    : `<div class="empty">${t("No calls match.")}</div>`;
 }
 
 function render() {
   const d = data, r = d.range, p = d.pricing;
   colors = new Map(d.projects.map((x, i) => [x.key, PALETTE[i % PALETTE.length]]));
   const total = d.projects.reduce((s, x) => s + x.calls, 0);
-  $("projects").innerHTML = [["", "All projects", total, "var(--text)"], ...d.projects.map((x) => [x.key, base(x.key), x.calls, colorOf(x.key)])]
-    .map(([k, n, c, col]) => `<button class="item ${state.project === k ? "on" : ""}" data-p="${esc(k)}" title="${esc(k || "All projects")}" style="--c:${col}">
+  $("projects").innerHTML = [["", t("All projects"), total, "var(--text)"], ...d.projects.map((x) => [x.key, base(x.key), x.calls, colorOf(x.key)])]
+    .map(([k, n, c, col]) => `<button class="item ${state.project === k ? "on" : ""}" data-p="${esc(k)}" title="${esc(k || t("All projects"))}" style="--c:${col}">
       <span class="sw"></span><span class="nm">${esc(n)}</span><span class="ct">${nf.format(c)}</span></button>`).join("");
   for (const b of $("periods").children) b.classList.toggle("on", Number(b.dataset.d) === state.days);
   const cur = d.projects.find((x) => x.key === state.project);
-  $("title").textContent = cur ? base(cur.key) : "All projects";
+  $("title").textContent = cur ? base(cur.key) : t("All projects");
   $("titleSw").style.setProperty("--c", cur ? colorOf(cur.key) : "var(--acc)");
-  $("meta").textContent = cur ? `${cur.key} · since ${new Date(cur.first).toLocaleDateString("en-US", { dateStyle: "medium" })} · last active ${ago(cur.last)} · mostly ${cur.topTool}`
-    : `${d.projects.length} project(s) · ${state.days ? `last ${state.days} days` : "all time"}`;
+  $("meta").textContent = cur ? t("{0} · since {1} · last active {2} · mostly {3}", cur.key, new Date(cur.first).toLocaleDateString(loc, { dateStyle: "medium" }), ago(cur.last), cur.topTool)
+    : state.days ? t("{0} project(s) · last {1} days", d.projects.length, state.days) : t("{0} project(s) · all time", d.projects.length);
   $("model").innerHTML = p.models.map((m) => `<option value="${m.key}" ${m.key === p.model ? "selected" : ""}>${esc(m.label)}</option>`).join("");
   $("kDollars").textContent = usd(r.dollars);
-  $("kDollarsSub").textContent = `today ${usd(d.today.dollars)} · 7d ${usd(d.week.dollars)}`;
+  $("kDollarsSub").textContent = t("today {0} · 7d {1}", usd(d.today.dollars), usd(d.week.dollars));
   $("kTokens").textContent = tok(r.saved); $("kTokens").title = `${nf.format(r.saved)} tokens`;
-  $("kTokensSub").textContent = `${tok(r.returned)} sent instead of ${tok(r.native)}`;
-  $("kPct").textContent = `−${pct(r)}%`; $("kPctSub").textContent = "vs built-in tool output";
-  $("kCalls").textContent = nf.format(r.calls); $("kCallsSub").textContent = `today ${nf.format(d.today.calls)} · total ${nf.format(d.total.calls)}`;
+  $("kTokensSub").textContent = t("{0} sent instead of {1}", tok(r.returned), tok(r.native));
+  $("kPct").textContent = `−${pct(r)}%`; $("kPctSub").textContent = t("vs built-in tool output");
+  $("kCalls").textContent = nf.format(r.calls); $("kCallsSub").textContent = t("today {0} · total {1}", nf.format(d.today.calls), nf.format(d.total.calls));
   chart();
   bars($("tools"), d.byTool, (k) => k);
   if (cur) {
-    $("sideTitle").innerHTML = `Days <span>tokens avoided (est.), most recent first</span>`;
+    $("sideTitle").innerHTML = `${t("Days")} <span>${t("tokens avoided (est.), most recent first")}</span>`;
     bars($("sideRows"), [...d.byDay].reverse().map((x) => ({ ...x, key: x.day })), (k) => k);
   } else {
-    $("sideTitle").innerHTML = `By project <span>tokens avoided (est.) · reduction · calls</span>`;
+    $("sideTitle").innerHTML = `${t("By project")} <span>${t("tokens avoided (est.) · reduction · calls")}</span>`;
     bars($("sideRows"), d.byProject, base, colorOf);
   }
   // Worktrees / sub-folders of the selected project: "(root)", "./apps/web", "repo-F-032", "repo-F-032/apps/web".
   $("wdCard").style.display = cur ? "" : "none";
   if (cur) {
     const parent = cur.key.replace(/[\\/][^\\/]+$/, "");
-    const rel = (w) => w === cur.key ? "(root)" : w.startsWith(cur.key + "/") ? "." + w.slice(cur.key.length)
+    const rel = (w) => w === cur.key ? t("(root)") : w.startsWith(cur.key + "/") ? "." + w.slice(cur.key.length)
       : w.startsWith(parent + "/") ? w.slice(parent.length + 1) : w;
     bars($("wdRows"), d.byWorkdir, rel);
   }
   const m = p.models.find((x) => x.key === p.model);
-  $("priceChecked").textContent = `$/MTok · checked ${p.checked}`;
+  $("priceChecked").textContent = t("$/MTok · checked {0}", p.checked);
   $("prices").innerHTML = [["Input", m.input], ["Cache write (5 min)", m.cacheWrite5m], ["Cache read", m.cacheRead], ["Output", m.output]]
-    .map(([n, v]) => `<div><b>$${v}</b><small>${n}</small></div>`).join("");
-  $("formula").innerHTML = `1 avoided token is worth <b style="color:var(--text)">$${p.rate.toFixed(2)}/MTok</b> here: ${esc(p.formula)}.
-    A tool result is written to the prompt cache once, then re-read on every later turn. Source: <a href="${esc(p.source)}" target="_blank" rel="noopener">Anthropic pricing</a>.`;
+    .map(([n, v]) => `<div><b>${usd(v)}</b><small>${t(n)}</small></div>`).join("");
+  $("formula").innerHTML = t("1 avoided token is worth {0} here: saved tokens × (5-min cache write + {1} later turns × cache read) per MTok. A tool result is written to the prompt cache once, then re-read on every later turn. Source: {2}.",
+    `<b style="color:var(--text)">${usd(p.rate)}/MTok</b>`, p.laterTurns, `<a href="${esc(p.source)}" target="_blank" rel="noopener">${t("Anthropic pricing")}</a>`);
   const h = d.redirections[state.days === 7 ? "week" : "total"];
-  $("hook").innerHTML = `<div><b>${nf.format(h.refused)}</b><small>refused, outline given</small></div>
-    <div><b>${nf.format(h.fallbacks)}</b><small>retried${h.refused ? ` (${Math.round(h.fallbacks / h.refused * 100)}%)` : ""}</small></div>`;
+  $("hook").innerHTML = `<div><b>${nf.format(h.refused)}</b><small>${t("refused, outline given")}</small></div>
+    <div><b>${nf.format(h.fallbacks)}</b><small>${t("retried")}${h.refused ? ` (${Math.round(h.fallbacks / h.refused * 100)}%)` : ""}</small></div>`;
   renderRecent();
 }
 
@@ -307,70 +414,76 @@ function rowsOf(el, list, empty) {
     <div class="bar"><i style="width:${Math.max(2, a.v / max * 100)}%;${a.c ? `--c:${a.c}` : ""}"></i></div></div>`).join("")
     : `<div class="empty">${empty}</div>`;
 }
+let lastSessions = null;
 function renderSessions(s) {
+  lastSessions = s;
   const sel = $("realModel");
-  sel.innerHTML = `<option value="">All models</option>` + s.models.map((m) => `<option value="${esc(m)}">${esc(label(m))}</option>`).join("");
+  sel.innerHTML = `<option value="">${t("All models")}</option>` + s.models.map((m) => `<option value="${esc(m)}">${esc(label(m))}</option>`).join("");
   sel.value = s.filters.model;
   $("bench").checked = s.filters.includeBench;
-  $("realScope").textContent = `${nf.format(s.sessions.length)} session(s) shown, last ${s.filters.days} days`
-    + (s.excluded ? ` · ${nf.format(s.excluded)} benchmark/temp session(s) hidden (excludeProjects in ~/.token-eco/config.json)` : "")
-    + (s.autoModel ? ` · main model: ${label(s.autoModel)}` : "");
+  $("realScope").textContent = t("{0} session(s) shown, last {1} days", nf.format(s.sessions.length), s.filters.days)
+    + (s.excluded ? t(" · {0} benchmark/temp session(s) hidden (excludeProjects in ~/.token-eco/config.json)", nf.format(s.excluded)) : "")
+    + (s.autoModel ? t(" · main model: {0}", label(s.autoModel)) : "");
   const c = s.coverage;
   $("cMain").textContent = share(c.mainPct);
-  $("cMainSub").textContent = `${nf.format(c.main.eco)} token-eco / ${nf.format(c.main.native)} built-in`;
+  $("cMainSub").textContent = t("{0} token-eco / {1} built-in", nf.format(c.main.eco), nf.format(c.main.native));
   $("cSub").textContent = share(c.subPct);
-  $("cSubSub").textContent = `${nf.format(c.sub.eco)} token-eco / ${nf.format(c.sub.native)} built-in`;
+  $("cSubSub").textContent = t("{0} token-eco / {1} built-in", nf.format(c.sub.eco), nf.format(c.sub.native));
   $("cBash").textContent = share(c.bashPct);
-  $("cBashSub").textContent = `${nf.format(c.bash.compacted)} of ${nf.format(c.bash.total)} Bash calls`;
+  $("cBashSub").textContent = t("{0} of {1} Bash calls", nf.format(c.bash.compacted), nf.format(c.bash.total));
   $("cAvoid").textContent = usd(s.avoided.usd);
-  $("cAvoidSub").textContent = `${share(s.avoided.shareOfCost)} of ${usd(s.breakdown.cost)} · ${tok(s.avoided.tokens)} tokens`;
+  $("cAvoidSub").textContent = t("{0} of {1} · {2} tokens", share(s.avoided.shareOfCost), usd(s.breakdown.cost), tok(s.avoided.tokens));
 
   const b = s.breakdown;
-  $("moneyInfo").textContent = `${usd(b.cost)} over ${nf.format(b.turns + b.subagentTurns)} turns`;
-  $("moneyTiles").innerHTML = `<div><b>${share(b.cost ? b.costSub / b.cost : null)}</b><small>in subagents (${usd(b.costSub)}, ${nf.format(b.subagentTurns)} turns)</small></div>
-    <div><b>${share(b.cost ? (b.cost - b.costSub) / b.cost : null)}</b><small>main thread (${usd(b.cost - b.costSub)}, ${nf.format(b.turns)} turns)</small></div>`;
+  $("moneyInfo").textContent = t("{0} over {1} turns", usd(b.cost), nf.format(b.turns + b.subagentTurns));
+  $("moneyTiles").innerHTML = `<div><b>${share(b.cost ? b.costSub / b.cost : null)}</b><small>${t("in subagents ({0}, {1} turns)", usd(b.costSub), nf.format(b.subagentTurns))}</small></div>
+    <div><b>${share(b.cost ? (b.cost - b.costSub) / b.cost : null)}</b><small>${t("main thread ({0}, {1} turns)", usd(b.cost - b.costSub), nf.format(b.turns))}</small></div>`;
   const K = [["read", "Cache reads (context re-read every turn)", "#5fb8ff"], ["write", "Cache writes (new context)", "#ffb35c"],
     ["output", "Output (model writing)", "#d38bff"], ["input", "Uncached input", "#9aa3ff"]];
-  rowsOf($("kinds"), K.map(([k, n, col]) => ({ k: n, v: b.kinds[k], txt: `${usd(b.kinds[k])} · ${share(b.cost ? b.kinds[k] / b.cost : null)}`, c: col })), "");
+  rowsOf($("kinds"), K.map(([k, n, col]) => ({ k: t(n), v: b.kinds[k], txt: `${usd(b.kinds[k])} · ${share(b.cost ? b.kinds[k] / b.cost : null)}`, c: col })), "");
   rowsOf($("topTools"), b.topTools.map((t) => ({ k: t.tool, v: t.calls, txt: nf.format(t.calls),
-    c: /eco:/.test(t.tool) ? "var(--acc)" : /^(sub:)?(Read|Grep|Glob|Edit|MultiEdit)$/.test(t.tool) ? "#ff7a8a" : "" })), "No tool call.");
+    c: /eco:/.test(t.tool) ? "var(--acc)" : /^(sub:)?(Read|Grep|Glob|Edit|MultiEdit)$/.test(t.tool) ? "#ff7a8a" : "" })), t("No tool call."));
 
   const L = s.levers;
-  const set = (v, want) => v ? `<span class="good">set: ${esc(v)}</span>` : `<span class="bad">not set</span> → <code>${esc(want)}</code>`;
+  const set = (v, want) => v ? `<span class="good">${t("set: {0}", esc(v))}</span>` : `<span class="bad">${t("not set")}</span> → <code>${esc(want)}</code>`;
   const lever = (title, cost, what, setting) => `<tr><td><b>${title}</b><br><small style="color:var(--muted)">${what}</small></td>
     <td class="n" style="white-space:nowrap">${cost}</td><td style="white-space:nowrap">${setting}</td></tr>`;
-  $("levers").innerHTML = `<table><tr><th>Driver</th><th class="n">Measured</th><th>Setting</th></tr>
-    ${lever("Huge contexts (main thread)", `${usd(L.compaction.over300k)} above 300K<br><small>${usd(L.compaction.over200k)} above 200K</small>`,
-      `Every turn re-reads the whole context; median peak ${tok(L.compaction.peakMedian)}. Compacting earlier (or /clear between tasks) cuts it.`,
+  $("levers").innerHTML = `<table><tr><th>${t("Driver")}</th><th class="n">${t("Measured")}</th><th>${t("Setting")}</th></tr>
+    ${lever(t("Huge contexts (main thread)"), `${t("{0} above 300K", usd(L.compaction.over300k))}<br><small>${t("{0} above 200K", usd(L.compaction.over200k))}</small>`,
+      t("Every turn re-reads the whole context; median peak {0}. Compacting earlier (or /clear between tasks) cuts it.", tok(L.compaction.peakMedian)),
       set(L.compaction.setting, "CLAUDE_CODE_AUTO_COMPACT_WINDOW=300k"))}
-    ${lever("Subagent model", `${usd(L.subagents.saving)} saved<br><small>with ${esc(label(L.subagents.cheaperModel))}</small>`,
-      L.subagents.byModel.filter((x) => x.turnsCost >= 1).map((x) => `${esc(label(x.model))} ${usd(x.turnsCost)}`).join(" · ") || "No subagent.",
+    ${lever(t("Subagent model"), `${t("{0} saved", usd(L.subagents.saving))}<br><small>${t("with {0}", esc(label(L.subagents.cheaperModel)))}</small>`,
+      L.subagents.byModel.filter((x) => x.turnsCost >= 1).map((x) => `${esc(label(x.model))} ${usd(x.turnsCost)}`).join(" · ") || t("No subagent."),
       set(L.subagents.setting, "CLAUDE_CODE_SUBAGENT_MODEL=claude-sonnet-5-5"))}
-    ${lever("Cache expired during long commands", `${usd(L.rebuilds.cost)}<br><small>${nf.format(L.rebuilds.count)} rewrites</small>`,
-      "Context rewritten after >5 min without a reply (tests, builds). A 1-hour cache avoids most of it, but its writes cost 2× input instead of 1.25×.",
+    ${lever(t("Cache expired during long commands"), `${usd(L.rebuilds.cost)}<br><small>${t("{0} rewrites", nf.format(L.rebuilds.count))}</small>`,
+      t("Context rewritten after >5 min without a reply (tests, builds). A 1-hour cache avoids most of it, but its writes cost 2× input instead of 1.25×."),
       set(L.rebuilds.setting, "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h"))}
-    ${lever("Starting context", `${usd(L.start.per10k)}<br><small>per 10K tokens less</small>`,
-      `System prompt, tools, skills, CLAUDE.md: ${tok(L.start.main)} (main), ${tok(L.start.sub)} per subagent (${nf.format(L.start.subagents)} started).`,
-      `<small>disable unused plugins / skills</small>`)}</table>
-    <p class="note" style="margin:10px 0 0">Measured over the sessions shown, before any change: once a setting is on, new sessions should make its figure shrink.</p>`;
+    ${lever(t("Starting context"), `${usd(L.start.per10k)}<br><small>${t("per 10K tokens less")}</small>`,
+      t("System prompt, tools, skills, CLAUDE.md: {0} (main), {1} per subagent ({2} started).", tok(L.start.main), tok(L.start.sub), nf.format(L.start.subagents)),
+      `<small>${t("disable unused plugins / skills")}</small>`)}</table>
+    <p class="note" style="margin:10px 0 0">${t("Measured over the sessions shown, before any change: once a setting is on, new sessions should make its figure shrink.")}</p>`;
 
-  const cmp = s.compare;
-  $("verdict").innerHTML = `<span class="${cmp.delta == null ? "" : cmp.delta <= 0 ? "good" : "bad"}">${esc(cmp.verdict)}</span>`;
-  $("groups").innerHTML = cmp.groups.length ? `<table><tr><th>Project</th><th>Model</th><th class="n">Sessions</th><th class="n">$ / turn</th><th class="n">Tokens / turn</th><th class="n">Peak context</th><th class="n">$ / session</th></tr>
+  const cmp = s.compare, nW = cmp.all.with.sessions, nO = cmp.all.without.sessions;
+  // Verdict built here (not the server's English sentence) so that it follows the language.
+  const verdict = nW < 3 || nO < 3 ? t("Not enough comparable sessions ({0} with / {1} without, same project and model; 3 of each needed).", nW, nO)
+    : t("Cost per turn {0} with token-eco (median, {1} vs {2} sessions). Tasks still differ: a trend, not a proof.",
+      `${cmp.delta <= 0 ? "−" : "+"}${Math.abs(Math.round(cmp.delta * 100))}%`, nW, nO);
+  $("verdict").innerHTML = `<span class="${cmp.delta == null ? "" : cmp.delta <= 0 ? "good" : "bad"}">${esc(verdict)}</span>`;
+  $("groups").innerHTML = cmp.groups.length ? `<table><tr><th>${t("Project")}</th><th>${t("Model")}</th>${["Sessions", "$ / turn", "Tokens / turn", "Peak context", "$ / session"].map((h) => `<th class="n">${t(h)}</th>`).join("")}</tr>
     ${cmp.groups.flatMap((g) => [["with", g.with], ["without", g.without]].map(([w, x], i) => `<tr><td>${i ? "" : esc(g.project)}</td><td>${i ? "" : esc(label(g.model))}</td>
-      <td class="n">${w === "with" ? "with" : "without"} · ${x.sessions}</td><td class="n">${usd(x.costPerTurn)}</td><td class="n">${tok(x.tokensPerTurn)}</td>
+      <td class="n">${t(w)} · ${x.sessions}</td><td class="n">${usd(x.costPerTurn)}</td><td class="n">${tok(x.tokensPerTurn)}</td>
       <td class="n">${tok(x.peakContext)}</td><td class="n">${usd(x.costPerSession)}</td></tr>`)).join("")}</table>`
-    : `<div class="empty">No project has sessions both with and without token-eco on the same model yet.</div>`;
+    : `<div class="empty">${t("No project has sessions both with and without token-eco on the same model yet.")}</div>`;
 
-  $("realRecent").innerHTML = s.sessions.length ? `<table><tr><th>When</th><th>Project</th><th>Model</th><th class="n">Turns (+sub)</th><th class="n">Cost</th>
-    <th class="n">$ / turn</th><th class="n">Peak ctx</th><th class="n">Cov. main</th><th class="n">Cov. sub</th><th class="n">Bash</th><th class="n">Avoided</th></tr>
+  $("realRecent").innerHTML = s.sessions.length ? `<table><tr>${["When", "Project", "Model"].map((h) => `<th>${t(h)}</th>`).join("")}
+    ${["Turns (+sub)", "Cost", "$ / turn", "Peak ctx", "Cov. main", "Cov. sub", "Bash", "Avoided"].map((h) => `<th class="n">${t(h)}</th>`).join("")}</tr>
     ${s.sessions.slice(0, 25).map((x) => `<tr><td title="${esc(x.start)} → ${esc(x.end)}">${esc(ago(x.end))}</td>
       <td title="${esc(x.project)}">${esc(x.name)}</td><td>${esc(label(x.model))}</td>
       <td class="n">${nf.format(x.turns)}${x.subagentTurns ? ` +${nf.format(x.subagentTurns)}` : ""}</td><td class="n">${usd(x.cost)}</td>
       <td class="n">${usd(x.costPerTurn)}</td><td class="n">${tok(x.peakContext)}</td><td class="n">${cov(x.main)}</td><td class="n">${cov(x.sub)}</td>
       <td class="n">${x.bash.total ? `${nf.format(x.bash.compacted)}/${nf.format(x.bash.total)}` : "–"}</td>
       <td class="n" title="${tok(x.avoidedTokens)} tokens">${x.avoidedUsd ? `${usd(x.avoidedUsd)} (${share(x.cost ? x.avoidedUsd / x.cost : 0)})` : "–"}</td></tr>`).join("")}</table>`
-    : `<div class="empty">No Claude Code session log in this period.</div>`;
+    : `<div class="empty">${t("No Claude Code session log in this period.")}</div>`;
 }
 async function loadSessions(qs) {
   try { renderSessions(await (await fetch(`/api/sessions?${qs}`)).json()); } catch { /* the estimates still show */ }
@@ -386,10 +499,11 @@ async function load() {
       ...(state.realModel ? { model: state.realModel } : {}), ...(state.bench ? { bench: "1" } : {}) }));
     data = await (await fetch(`/api/stats?${qs}`)).json();
     if (state.project && !data.projects.some((x) => x.key === state.project)) return pick("");
-    $("updated").textContent = `updated ${new Date().toLocaleTimeString("en-US")}`;
+    $("updated").textContent = t("updated {0}", new Date().toLocaleTimeString(loc));
     render();
-  } catch { $("updated").textContent = "server unreachable"; }
+  } catch { $("updated").textContent = t("server unreachable"); }
 }
+setLang(lang);
 load();
 const timer = setInterval(load, 10000);
 </script>

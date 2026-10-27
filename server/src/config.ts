@@ -30,6 +30,14 @@ export interface Config {
   port: number;
   /** PreToolUse hook: "redirect" refuses once a full Read of a big file / a Grep in content mode. */
   hook: { mode: "off" | "redirect"; lineThreshold: number };
+  /** Language of the terminal texts (/eco-stats, status line): "auto" = from LANG / LC_ALL. */
+  lang: "auto" | "en" | "fr";
+}
+
+/** "en" | "fr" for the terminal texts. */
+export function uiLang(cfg: Config = readConfig()): "en" | "fr" {
+  if (cfg.lang === "en" || cfg.lang === "fr") return cfg.lang;
+  return /^fr/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || "") ? "fr" : "en";
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -38,6 +46,7 @@ export const DEFAULT_CONFIG: Config = {
   laterTurns: 10,
   port: 4777,
   hook: { mode: "redirect", lineThreshold: 300 },
+  lang: "auto",
 };
 
 /** Reads ~/.token-eco/config.json (created with defaults; pre-0.4 keys are migrated and rewritten). */
@@ -61,6 +70,7 @@ export function readConfig(): Config {
       laterTurns: Number.isFinite(c.laterTurns) ? c.laterTurns : DEFAULT_CONFIG.laterTurns,
       port: Number.isFinite(c.port) ? c.port : DEFAULT_CONFIG.port,
       hook,
+      lang: c.lang === "en" || c.lang === "fr" ? c.lang : "auto",
     };
     if (old) writeFileSync(f, JSON.stringify(cfg, null, 2) + "\n");
     return cfg;
