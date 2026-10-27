@@ -32,6 +32,7 @@ export function startServer(port: number): Promise<Server> {
           project: url.searchParams.get("project") ?? undefined,
           days: Number.isInteger(days) && days > 0 && days <= 3650 ? days : null,
           model: url.searchParams.get("model") ?? undefined,
+          includeBench: url.searchParams.get("bench") === "1",
         });
         res.writeHead(200, { ...HEADERS, "Content-Type": "application/json" }).end(JSON.stringify(body));
       } else if (req.method === "GET" && url.pathname === "/api/sessions") {

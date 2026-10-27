@@ -177,6 +177,13 @@ export function byKey(key: "tool" | "project", s: Scope = {}): ({ key: string } 
     .all(...p) as never;
 }
 
+/** Totals per exact folder (worktree / sub-folder) inside a scope. */
+export function byWorkdir(s: Scope = {}): ({ key: string } & Aggregate)[] {
+  const [w, p] = where(s);
+  return openDb().prepare(`SELECT COALESCE(workdir, project) AS key, ${SUMS} FROM calls WHERE ${w} GROUP BY key ORDER BY saved DESC`)
+    .all(...p) as never;
+}
+
 /** Every project with its totals, first/last activity and most used tool (most recent first). */
 export function projects(): ({ key: string; first: string; last: string; topTool: string } & Aggregate)[] {
   return openDb().prepare(`SELECT project AS key, ${SUMS}, MIN(ts) AS first, MAX(ts) AS last,

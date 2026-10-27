@@ -177,6 +177,7 @@ __export(db_exports, {
   byDay: () => byDay,
   byDayAndKey: () => byDayAndKey,
   byKey: () => byKey,
+  byWorkdir: () => byWorkdir,
   callsInWindow: () => callsInWindow,
   closeDb: () => closeDb,
   openDb: () => openDb,
@@ -330,6 +331,10 @@ function byDayAndKey(key, s) {
 function byKey(key, s = {}) {
   const [w, p] = where(s);
   return openDb().prepare(`SELECT ${key} AS key, ${SUMS} FROM calls WHERE ${w} GROUP BY ${key} ORDER BY saved DESC`).all(...p);
+}
+function byWorkdir(s = {}) {
+  const [w, p] = where(s);
+  return openDb().prepare(`SELECT COALESCE(workdir, project) AS key, ${SUMS} FROM calls WHERE ${w} GROUP BY key ORDER BY saved DESC`).all(...p);
 }
 function projects() {
   return openDb().prepare(`SELECT project AS key, ${SUMS}, MIN(ts) AS first, MAX(ts) AS last,
@@ -891,6 +896,7 @@ function statistics(q = {}) {
   const model = q.model && PRICES[q.model] ? q.model : effectiveModel(cfg);
   const $ = (a) => ({ ...a, dollars: toDollars(a.saved, cfg, model) });
   const scope = { project: q.project || void 0, days: q.days ?? null };
+  const keep = (p) => !!q.includeBench || !isBench(p.key, cfg);
   return {
     estimate: `Estimates: 1 token \u2248 ${CHARS_PER_TOKEN} characters; "native" = assumed size of the equivalent built-in tool's output.`,
     pricing: {
@@ -911,9 +917,12 @@ function statistics(q = {}) {
     byDay: byDay(scope.days ?? 3650, scope.project).map($),
     stack: { by: scope.project ? "tool" : "project", rows: byDayAndKey(scope.project ? "tool" : "project", scope) },
     byTool: byKey("tool", scope).map($),
-    // Benchmark / temp folders (config excludeProjects) stay out of the project lists.
-    byProject: byKey("project", scope).filter((p) => !isBench(p.key, cfg)).map($),
-    projects: projects().filter((p) => !isBench(p.key, cfg)).map($),
+    // Benchmark / temp folders (config excludeProjects) stay out of the project lists unless asked.
+    byProject: byKey("project", scope).filter(keep).map($),
+    projects: projects().filter(keep).map($),
+    hiddenProjects: q.includeBench ? 0 : projects().filter((p) => isBench(p.key, cfg)).length,
+    // Inside one project: its worktrees / sub-folders.
+    byWorkdir: scope.project ? byWorkdir(scope).map($) : [],
     recent: recent(30, scope),
     redirections: { day: redirectStats("day"), week: redirectStats("week"), total: redirectStats("total") }
   };
@@ -991,7 +1000,8 @@ function startServer(port2) {
         const body = statistics({
           project: url.searchParams.get("project") ?? void 0,
           days: Number.isInteger(days) && days > 0 && days <= 3650 ? days : null,
-          model: url.searchParams.get("model") ?? void 0
+          model: url.searchParams.get("model") ?? void 0,
+          includeBench: url.searchParams.get("bench") === "1"
         });
         res.writeHead(200, { ...HEADERS, "Content-Type": "application/json" }).end(JSON.stringify(body));
       } else if (req.method === "GET" && url.pathname === "/api/sessions") {
