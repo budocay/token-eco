@@ -54,14 +54,47 @@ d'emblée, pas de tour `ToolSearch`.
 
 ## Installation
 
-Nécessite Node ≥ 22.13 (`node:sqlite`). `server/dist/` est commité, rien à compiler.
+**Prérequis** : Claude Code, et Node ≥ 22.13 dans le `PATH` (`node -v` ; le dashboard utilise `node:sqlite`).
+`server/dist/` est commité : rien à compiler ni à `npm install`.
 
+**1. Ajouter le marketplace et installer** (dans Claude Code) :
 ```
 /plugin marketplace add budocay/token-eco
 /plugin install token-eco@token-eco-marketplace
 ```
+ou depuis un terminal :
+```
+claude plugin marketplace add budocay/token-eco
+claude plugin install token-eco@token-eco-marketplace --scope user
+```
 Depuis un clone local : `/plugin marketplace add /chemin/vers/token-eco`.
-Redémarre Claude Code et vérifie avec `/mcp` que le serveur `token-eco` est connecté.
+
+**2. Redémarrer Claude Code** (fermer toutes les sessions ouvertes : une session garde les plugins de son démarrage,
+et une session reprise, `claude -c` / `--resume`, garde son ancien agent principal). En lancer une nouvelle avec `claude`.
+
+**3. Vérifier** qu'il est vraiment utilisé :
+- `/mcp` → le serveur `token-eco` est connecté ;
+- `/eco-dashboard` → dans **Sessions**, la colonne **Agent** affiche `token-eco:eco` pour les nouvelles sessions, et
+  les notes ⚠ sous « Sessions réelles » disent ce qui contourne encore les outils ;
+- `/eco-stats` → la même chose dans le terminal.
+
+**Mise à jour** : `claude plugin marketplace update token-eco-marketplace && claude plugin update token-eco@token-eco-marketplace --scope user`,
+puis redémarrer. **Désinstallation** : `/plugin` → token-eco → désinstaller (les données restent dans `~/.token-eco/`).
+
+### Si les outils sont peu utilisés
+
+Les outils n'économisent que s'ils sont appelés. Mesuré sur des sessions réelles, les causes habituelles sont :
+- **Un autre plugin définit l'agent principal** (`"agent"` dans son `settings.json`) : un seul l'emporte, et les
+  outils deviennent alors facultatifs. Désactive ce plugin, ou retire la ligne `"agent"` du `settings.json` de
+  token-eco si tu préfères l'autre (le hook s'applique quand même).
+- **Tes propres agents ont une liste `tools:`** (typique des relecteurs en lecture seule : `Read, Grep, Glob`) : ils
+  ne peuvent pas appeler token-eco du tout. Ajoute `mcp__plugin_token-eco_token-eco__read, mcp__plugin_token-eco_token-eco__search`
+  (lecture seule), ou lance `/eco-adopt`. Si ces fichiers sont générés, modifie le générateur.
+- **Les agents lisent les fichiers via Bash** (`cat`, `sed -n`, `grep`) : le hook redirige les `cat` complets de gros
+  fichiers, et la consigne de session interdit le reste, mais les `sed -n` / `grep` ciblés passent encore.
+- **Le fil principal ne fait qu'orchestrer** : dans les projets où il délègue tout, toute la lecture se fait dans les
+  sous-agents et la conversation principale ne montre aucun appel token-eco. Regarde plutôt « Outils les plus
+  utilisés » (`sub:eco:…`).
 
 ## Utilisation
 
@@ -75,7 +108,7 @@ Redémarre Claude Code et vérifie avec `/mcp` que le serveur `token-eco` est co
 **Dashboard** : barre latérale des projets (tous, ou un seul, triés par dernière activité, une couleur chacun), période
 7 j/30 j/90 j/Tout, choix du modèle pour les tarifs, indicateurs (estimations par appel : dollars, tokens évités,
 réduction, appels), une partie **Sessions réelles** (vrais tokens par tour / par session et coût d'après les logs Claude
-Code, avec vs sans token-eco, sessions récentes), graphique quotidien empilé par projet (ou par outil dans un projet)
+Code, avec vs sans token-eco, sessions récentes avec leur agent principal, notes ⚠ sur ce qui contourne les outils), graphique quotidien empilé par projet (ou par outil dans un projet)
 avec légende cliquable, barres par outil et par projet, carte des tarifs, compteurs du hook, appels récents filtrables.
 Un projet = son dépôt git principal : sous-dossiers et worktrees git y sont regroupés, et la vue d'un projet a une carte
 **Worktrees et dossiers** ; les dossiers de benchmark/temporaires (`excludeProjects`) restent hors de la barre latérale.
@@ -125,10 +158,20 @@ Résultats multi-langages (vérité terrain ctags) : `node bench/languages.ts` �
 
 **A/B réel** (`npm run bench:ab -- --model sonnet --trials 4 [--tasks t4,t5]`, payant, plafonné par `--budget`) : lance
 les mêmes tâches dans `claude -p` avec et sans le plugin et compare coût réel, contexte, tours et réussite →
-`server/bench/AB.md`. Désactive d'abord le plugin installé. Résultats (Sonnet) : v0.3 (t1-t5 × 4) eco −8 % de coût
-(≈ −10 % sans le biais du cache froid, désormais supprimé par un échauffement non compté ; `--no-warmup` pour le
-sauter) ; v0.4.1 (t4, t5 × 4) −10 % de coût, 16/16 réussites, −20 % de contexte. Plancher ≈ −10 % sur les tâches courtes
-(coût fixe du prompt).
+`server/bench/AB.md`. Désactive d'abord le plugin installé. « natif » = outils token-eco interdits et hook coupé ;
+« eco » = plugin + agent `token-eco:eco` + hook. Résultats (Sonnet) : v0.3 (t1-t5 × 4) eco −8 % de coût (≈ −10 % sans le
+biais du cache froid, désormais supprimé par un échauffement non compté ; `--no-warmup` pour le sauter). Dernier run,
+v0.4.1, 4 essais chacun :
+
+| Tâche | Coût natif | Coût eco | Écart | Tours natif / eco | Contexte (tok.) natif / eco | Réussite |
+|---|---|---|---|---|---|---|
+| t4 (recherche + lecture + édition dans zod) | 0,147 $ | 0,131 $ | **−11 %** | 4,5 / 4,0 | 173K / 158K | 4/4 · 4/4 |
+| t5 (fonctionnalité + tests dans `server/`) | 0,174 $ | 0,158 $ | **−9 %** | 7,5 / 4,5 | 208K / 158K | 4/4 · 4/4 |
+| **Total** | 0,321 $ | 0,288 $ | **−10 %** | | | 16/16 |
+
+Le gain vient de tours en moins (un `search` + un `read` + un `edit` au lieu de Grep, Read et plusieurs Edit), pas de
+résultats plus petits. Plancher ≈ −10 % sur les tâches courtes : ~32K tokens de prompt fixe par run. 4 essais : un écart
+de quelques % n'est que du bruit.
 
 **Sessions réelles** (`node bench/session-cost.ts <dir> <dir>… [--latest] [--cold]` : coût réel d'après les logs de
 session Claude Code, sous-agents compris ; `--cold` retire le biais du cache chaud au premier tour). Une session en
@@ -158,6 +201,28 @@ dépasse tout effet. Là où il aide de façon mesurable : tâches courtes et ci
 longues sorties de tests/builds (compaction Bash), lectures complètes de très gros fichiers (redirigées vers un plan),
 et le dashboard d'usage. Leçons transformées en correctifs : search garde l'indentation (recopiée dans les edits), et
 les lots `edit` en échec montrent le passage le plus proche, pour que la nouvelle tentative tienne en un appel.
+
+**Usage réel** (30 jours des propres logs Claude Code de l'auteur, plusieurs projets, lus par le dashboard ;
+2026-10-27). Les benchmarks disent ce que les outils peuvent économiser ; ceci dit s'ils ont été utilisés :
+
+| | appels token-eco | appels natifs | part |
+|---|---|---|---|
+| conversation principale | 21 | 445 | 4,7 % |
+| sous-agents | 112 | 9 685 | 1,2 % |
+
+Économie estimée : environ 3 $ sur une facture de 4 283 $ (< 0,1 %) ; les sous-agents pesaient 44 % de cette facture.
+Les logs ont donné les causes, affichées désormais en notes ⚠ dans le dashboard : l'agent principal d'un autre plugin
+l'emportait sur `token-eco:eco` dans les sessions récentes ; les agents du projet en lecture seule (relecteurs,
+sécurité, architecture) n'avaient que `Read, Grep, Glob` ; et les sous-agents lisaient les fichiers via Bash : sur
+9 680 appels Bash, `cat` a renvoyé 8 Mo, `sed -n` 7 Mo et `grep` 4,8 Mo, tous relus à chaque tour suivant. Correctifs :
+le hook redirige aussi `cat -n`, les `cat` de plusieurs fichiers et enchaînés ; la consigne interdit de lire via Bash ;
+le dashboard montre l'agent principal de chaque session. Le jour même, une fois l'autre plugin d'agent retiré et les
+relecteurs équipés de `read`/`search` : un relecteur frontend a utilisé token-eco pour **55 %** de ses appels sur les
+fichiers (62 contre 50 ; 0 % avant) et le producteur frontend pour 21 % (50 contre 191, surtout des `Edit` natifs).
+Un projet, quelques heures : à confirmer dans les semaines qui viennent avec le même dashboard.
+
+**Leçon** : avec un plugin comme celui-ci, l'adoption compte plus que la qualité des outils. Vérifie la colonne
+**Agent** et les cartes de couverture avant de lire la moindre économie.
 
 ## Développement
 

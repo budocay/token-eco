@@ -52,14 +52,46 @@ back, delete it from `disallowedTools` in `agents/eco.md`. `alwaysLoad: true`: t
 
 ## Install
 
-Requires Node ≥ 22.13 (`node:sqlite`). `server/dist/` is committed, nothing to build.
+**Requirements**: Claude Code, and Node ≥ 22.13 on your `PATH` (`node -v`; the dashboard uses `node:sqlite`).
+`server/dist/` is committed: nothing to build or `npm install`.
 
+**1. Add the marketplace and install** (inside Claude Code):
 ```
 /plugin marketplace add budocay/token-eco
 /plugin install token-eco@token-eco-marketplace
 ```
+or from a terminal:
+```
+claude plugin marketplace add budocay/token-eco
+claude plugin install token-eco@token-eco-marketplace --scope user
+```
 From a local clone instead: `/plugin marketplace add /path/to/token-eco`.
-Restart Claude Code and check with `/mcp` that the `token-eco` server is connected.
+
+**2. Restart Claude Code** (close every running session: a session keeps the plugins it started with, and a
+resumed one, `claude -c` / `--resume`, keeps its old main agent). Start a new one with `claude`.
+
+**3. Check** that it is really used:
+- `/mcp` → the `token-eco` server is connected;
+- `/eco-dashboard` → in **Sessions**, the **Agent** column shows `token-eco:eco` for the new sessions, and the
+  ⚠ notes under "Real sessions" say what still bypasses the tools;
+- `/eco-stats` → the same in the terminal.
+
+**Update**: `claude plugin marketplace update token-eco-marketplace && claude plugin update token-eco@token-eco-marketplace --scope user`,
+then restart. **Uninstall**: `/plugin` → token-eco → uninstall (your data stays in `~/.token-eco/`).
+
+### If the tools are barely used
+
+The tools only save tokens when the agents call them. Measured on real sessions, the usual causes are:
+- **Another plugin sets the main agent** (`"agent"` in its `settings.json`): only one wins, and the tools then
+  become optional. Disable that plugin, or remove the `"agent"` line from token-eco's `settings.json` if you prefer
+  the other one (the hook still applies).
+- **Your own agents have a `tools:` list** (typical for read-only reviewers: `Read, Grep, Glob`): they cannot call
+  token-eco at all. Add `mcp__plugin_token-eco_token-eco__read, mcp__plugin_token-eco_token-eco__search` (read-only),
+  or run `/eco-adopt`. If those files are generated, change the generator.
+- **Agents read files through Bash** (`cat`, `sed -n`, `grep`): the hook redirects whole-file `cat` of big files,
+  and the session guidance forbids the rest, but targeted `sed -n` / `grep` still go through.
+- **The main thread only orchestrates**: in projects where it delegates everything, all the reading happens in
+  subagents and the main conversation shows no token-eco call. Look at "Most used tools" (`sub:eco:…`) instead.
 
 ## Usage
 
@@ -72,7 +104,7 @@ Restart Claude Code and check with `/mcp` that the `token-eco` server is connect
 **Dashboard**: project sidebar (all projects, or one, sorted by last activity, one colour each), period 7d/30d/90d/All,
 model selector for pricing, KPIs (per-call estimates: dollars, tokens avoided, reduction, calls), a **Real sessions**
 card (actual tokens per turn / per session and cost from the Claude Code logs, with vs without token-eco, recent
-sessions), daily chart stacked by project (or by tool inside a
+sessions with their main agent, ⚠ notes on what bypasses the tools), daily chart stacked by project (or by tool inside a
 project) with a clickable legend, per-tool and per-project bars, pricing card, hook counters, filterable recent calls.
 A project is its main git repository: sub-folders and git worktrees are grouped under it, and the project view has a
 **Worktrees & folders** card; benchmark/temp folders (`excludeProjects`) are kept out of the sidebar.
@@ -119,9 +151,19 @@ Multi-language results (ctags ground truth): `node bench/languages.ts` → `serv
 
 **Real A/B** (`npm run bench:ab -- --model sonnet --trials 4 [--tasks t4,t5]`, paid, capped by `--budget`): runs the
 same tasks in `claude -p` with and without the plugin and compares real cost, context, turns and success →
-`server/bench/AB.md`. Disable the installed plugin first. Results (Sonnet): v0.3 (t1-t5 × 4) eco −8% cost
-(≈ −10% without the cold-cache bias, now removed by an uncounted warmup; `--no-warmup` to skip it); v0.4.1 (t4, t5 × 4)
-−10% cost, 16/16 successes, −20% context. Floor ≈ −10% on short tasks (fixed prompt cost).
+`server/bench/AB.md`. Disable the installed plugin first. "native" = token-eco tools disallowed and hook off;
+"eco" = plugin + `token-eco:eco` agent + hook. Results (Sonnet): v0.3 (t1-t5 × 4) eco −8% cost (≈ −10% without the
+cold-cache bias, now removed by an uncounted warmup; `--no-warmup` to skip it). Latest run, v0.4.1, 4 trials each:
+
+| Task | Native cost | Eco cost | Delta | Turns native / eco | Context (tok.) native / eco | Success |
+|---|---|---|---|---|---|---|
+| t4 (search + read + edit in zod) | $0.147 | $0.131 | **−11%** | 4.5 / 4.0 | 173K / 158K | 4/4 · 4/4 |
+| t5 (feature + tests in `server/`) | $0.174 | $0.158 | **−9%** | 7.5 / 4.5 | 208K / 158K | 4/4 · 4/4 |
+| **Total** | $0.321 | $0.288 | **−10%** | | | 16/16 |
+
+The gain comes from fewer turns (one `search` + one `read` + one `edit` instead of Grep, Read, several Edit), not
+from smaller results. Floor ≈ −10% on short tasks: ~32K tokens of fixed prompt per run. 4 trials: a gap of a few %
+is noise.
 
 **Real sessions** (`node bench/session-cost.ts <dir> <dir>… [--latest] [--cold]`: real cost from the Claude Code
 session logs, subagents included; `--cold` removes the warm-cache bias of the first turn). A 6-step session on
@@ -149,6 +191,27 @@ effect. Where it measurably helps: short targeted tasks (−10% in the A/B above
 (Bash compaction), full reads of very large files (redirected to an outline), and the usage dashboard.
 Lessons turned into fixes: search kept indentation (copied into edits), failed `edit` batches now show the
 closest passage so the retry takes one call.
+
+**Real usage** (30 days of the author's own Claude Code logs, several projects, read by the dashboard; 2026-10-27).
+Benchmarks say what the tools can save; this says whether they were used:
+
+| | token-eco calls | built-in calls | share |
+|---|---|---|---|
+| main conversation | 21 | 445 | 4.7% |
+| subagents | 112 | 9,685 | 1.2% |
+
+Estimated savings: about $3 on a $4,283 bill (< 0.1%); subagents were 44% of that bill. The logs gave the reasons,
+now shown as ⚠ notes in the dashboard: another plugin's main agent won over `token-eco:eco` in the recent
+sessions; the read-only project agents (reviewers, security, architecture) only had `Read, Grep, Glob`; and
+subagents read files through Bash: over 9,680 Bash calls, `cat` returned 8 MB, `sed -n` 7 MB and `grep` 4.8 MB, all
+re-read on every later turn. Fixes: the hook also redirects `cat -n`, multi-file and chained `cat`; the guidance
+forbids reading through Bash; the dashboard shows the main agent of each session. Same day, after the other agent
+plugin was removed and the reviewers got `read`/`search`: a frontend reviewer used token-eco for **55%** of its file
+calls (62 vs 50; 0% before) and the frontend producer for 21% (50 vs 191, mostly native `Edit`). One project, a few
+hours: to confirm over the next weeks with the same dashboard.
+
+**Lesson**: with a plugin like this one, adoption matters more than tool quality. Check the **Agent** column and the
+coverage cards before reading any saving.
 
 ## Development
 
