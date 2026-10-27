@@ -7349,7 +7349,7 @@ var init_config = __esm({
       excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
       laterTurns: 10,
       port: 4777,
-      hook: { mode: "redirect", lineThreshold: 300 },
+      hook: { mode: "redirect", lineThreshold: 300, minTokens: 6e3 },
       lang: "auto"
     };
     AUTO_FILE = () => join2(dataDir(), "auto-model.json");
@@ -23949,7 +23949,7 @@ init_config();
 import { execFile } from "node:child_process";
 import { extname as extname2 } from "node:path";
 import { fileURLToPath } from "node:url";
-var server = new McpServer({ name: "token-eco", version: "0.7.3" });
+var server = new McpServer({ name: "token-eco", version: "0.7.4" });
 var ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 function adapter(name, tool) {
   return async (args) => {

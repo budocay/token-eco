@@ -115,7 +115,7 @@ var init_config = __esm({
       excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
       laterTurns: 10,
       port: 4777,
-      hook: { mode: "redirect", lineThreshold: 300 },
+      hook: { mode: "redirect", lineThreshold: 300, minTokens: 6e3 },
       lang: "auto"
     };
     AUTO_FILE = () => join(dataDir(), "auto-model.json");

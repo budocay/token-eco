@@ -17,7 +17,7 @@ import { record, recordRedirect } from "./db.ts";
 import { family } from "./compact.ts";
 import { outline } from "./tools/outline.ts";
 import { nativeReadChars, splitLines } from "./types.ts";
-import { estimateTokens } from "./tokens.ts";
+import { CHARS_PER_TOKEN, estimateTokens } from "./tokens.ts";
 import { guidanceOutput } from "./guidance.ts";
 
 export interface HookInput {
@@ -95,6 +95,15 @@ export function splitCompound(command: string): { parts: string[]; ops: string[]
   return { parts: trimmed, ops };
 }
 
+/** Worth redirecting: many lines AND many tokens (size unknown, e.g. in tests → lines only). A 450-line Markdown
+ *  spec is ~3.6K tokens: its outline saves little and the refusal costs a whole turn. */
+function bigEnough(file: string, lines: number, config: Config): boolean {
+  if (lines <= config.hook.lineThreshold) return false;
+  let size: number | null = null;
+  try { size = statSync(file).size; } catch { /* unknown */ }
+  return size === null || size > (config.hook.minTokens ?? 0) * CHARS_PER_TOKEN;
+}
+
 export function countLines(filePath: string): number {
   const size = statSync(filePath).size;
   if (size > 50_000_000) return Infinity;
@@ -149,7 +158,7 @@ export function decide(e: HookInput, config: Config, state: State, now = Date.no
       try { k = NON_TEXT.has(extname(abs).toLowerCase()) ? 0 : linesOf(abs); } catch { /* missing: let cat fail */ }
       if (k > n) { n = k; big = abs; }
     }
-    if (n > config.hook.lineThreshold) {
+    if (bigEnough(big, n, config)) {
       e = { ...e, tool_input: { file_path: big } };
       return redirectRead(e, big, n, state, now, cats.length > 1 ? `\`cat\` of ${cats.length} files including this one` : `\`cat ${big}\``);
     }
@@ -183,7 +192,7 @@ export function decide(e: HookInput, config: Config, state: State, now = Date.no
     file = isAbsolute(f) || !e.cwd ? f : join(e.cwd, f);
     let n: number;
     try { n = linesOf(file); } catch { return { action: "pass" }; }
-    if (n <= config.hook.lineThreshold) return { action: "pass" };
+    if (!bigEnough(file, n, config)) return { action: "pass" };
     return redirectRead(e, file, n, state, now, "a full Read");
   } else if (e.tool_name === "Grep") {
     if (ti.output_mode !== "content") return { action: "pass" };

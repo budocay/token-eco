@@ -33,7 +33,7 @@ var DEFAULT_CONFIG = {
   excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
   laterTurns: 10,
   port: 4777,
-  hook: { mode: "redirect", lineThreshold: 300 },
+  hook: { mode: "redirect", lineThreshold: 300, minTokens: 6e3 },
   lang: "auto"
 };
 function readConfig() {
@@ -1104,6 +1104,15 @@ function splitCompound(command) {
   }
   return { parts: trimmed, ops };
 }
+function bigEnough(file, lines, config) {
+  if (lines <= config.hook.lineThreshold) return false;
+  let size = null;
+  try {
+    size = statSync(file).size;
+  } catch {
+  }
+  return size === null || size > (config.hook.minTokens ?? 0) * CHARS_PER_TOKEN;
+}
 function countLines(filePath) {
   const size = statSync(filePath).size;
   if (size > 5e7) return Infinity;
@@ -1155,7 +1164,7 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
         big = abs;
       }
     }
-    if (n > config.hook.lineThreshold) {
+    if (bigEnough(big, n, config)) {
       e = { ...e, tool_input: { file_path: big } };
       return redirectRead(e, big, n, state, now, cats.length > 1 ? `\`cat\` of ${cats.length} files including this one` : `\`cat ${big}\``);
     }
@@ -1196,7 +1205,7 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
     } catch {
       return { action: "pass" };
     }
-    if (n <= config.hook.lineThreshold) return { action: "pass" };
+    if (!bigEnough(file, n, config)) return { action: "pass" };
     return redirectRead(e, file, n, state, now, "a full Read");
   } else if (e.tool_name === "Grep") {
     if (ti.output_mode !== "content") return { action: "pass" };

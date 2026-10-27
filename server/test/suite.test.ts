@@ -1,6 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { get } from "node:http";
 import { join } from "node:path";
@@ -161,6 +162,14 @@ test("hook: `cat big-file` in Bash handled as a full Read (shared retry state); 
   const m = decide(bash("cd /q && cat small.ts && cat -n big.ts"), cfg, {}, 0, big);
   assert.equal((m as { key: string }).key, "s|Read|/q/big.ts");
   assert.match((m as { message: string }).message, /`cat` of 2 files including this one/);
+  // Many short lines but few tokens (a 450-line Markdown spec): not worth a refused turn.
+  const dir = mkdtempSync(join(tmpdir(), "te-min-")), md = join(dir, "spec.md"), code = join(dir, "big.ts");
+  writeFileSync(md, "short line\n".repeat(450)); writeFileSync(code, `${"x".repeat(80)}\n`.repeat(450));
+  const tok = { ...cfg, hook: { ...cfg.hook, minTokens: 6000 } };
+  const read = (file_path: string) => ({ session_id: "s", cwd: dir, tool_name: "Read", tool_input: { file_path } });
+  assert.equal(decide(read(md), tok, {}, 0).action, "pass");
+  assert.equal(decide(bash(`cat ${md}`), tok, {}, 0).action, "pass");
+  assert.equal(decide(read(code), tok, {}, 0).action, "refused"); // 450 × 81 chars ≈ 9K tokens
   assert.equal(family("flutter test"), "test"); assert.equal(family("flutter analyze"), "build"); assert.equal(family("dart pub get"), "install");
 });
 

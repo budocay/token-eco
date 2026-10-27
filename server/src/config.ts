@@ -29,7 +29,9 @@ export interface Config {
   laterTurns: number;
   port: number;
   /** PreToolUse hook: "redirect" refuses once a full Read of a big file / a Grep in content mode. */
-  hook: { mode: "off" | "redirect"; lineThreshold: number };
+  /** minTokens: a whole-file read is only redirected if the file is ALSO above this size (estimated tokens):
+   *  below it, the refused call + retry costs a turn and saves less than it costs (adoption bench, 2026-10-27). */
+  hook: { mode: "off" | "redirect"; lineThreshold: number; minTokens?: number };
   /** Language of the terminal texts (/eco-stats, status line): "auto" = from LANG / LC_ALL. */
   lang: "auto" | "en" | "fr";
 }
@@ -45,7 +47,7 @@ export const DEFAULT_CONFIG: Config = {
   excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
   laterTurns: 10,
   port: 4777,
-  hook: { mode: "redirect", lineThreshold: 300 },
+  hook: { mode: "redirect", lineThreshold: 300, minTokens: 6000 },
   lang: "auto",
 };
 

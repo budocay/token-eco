@@ -28,7 +28,7 @@ const SERVER = join(HERE, "..");
 const arg = (name: string, def: string) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : def; };
 const DRY = process.argv.includes("--dry");
 const MODELS = arg("models", "sonnet,opus").split(",");
-const TRIALS = Number(arg("trials", "3")), BUDGET = arg("budget", "4"), MAX_TOTAL = Number(arg("max-total", "100"));
+const OUT = arg("out", "adoption"); const TRIALS = Number(arg("trials", "3")), BUDGET = arg("budget", "4"), MAX_TOTAL = Number(arg("max-total", "100"));
 const ECO_TOOLS = "mcp__plugin_token-eco_token-eco__read, mcp__plugin_token-eco_token-eco__search";
 
 interface Variant { id: string; plugin: boolean; reviewerEco: boolean }
@@ -90,7 +90,7 @@ function fixture(folder: string, v: Variant): void {
 }
 
 // ---------- Tasks ----------
-interface Task { id: string; prompt: string; prepare: (folder: string) => void; verify: (answer: string, folder: string) => { ok: boolean; detail: string } }
+interface Task { id: string; prompt: string; budget?: string; prepare: (folder: string) => void; verify: (answer: string, folder: string) => { ok: boolean; detail: string } }
 const mutate = (folder: string, file: string, from: string, to: string) => {
   const p = join(folder, file), s = readFileSync(p, "utf8");
   if (!s.includes(from)) throw new Error(`fixture: "${from}" not found in ${file}`);
@@ -124,6 +124,23 @@ const TASKS: Task[] = [
       const r = spawnSync("node", ["--test", "test/"], { cwd: f, encoding: "utf8", timeout: 180_000, env: { ...process.env, TOKEN_ECO_HOME: mkdtempSync(join(tmpdir(), "te-ad-verify-")) } });
       const fail = /(?:#|ℹ) fail (\d+)/.exec(r.stdout)?.[1] ?? "?";
       return { ok: r.status === 0, detail: r.status === 0 ? "suite + hidden test pass" : `${fail} failing test(s)` };
+    },
+  },
+  {
+    // Long session: the same spec and files are needed again and again (where repeated whole reads should cost).
+    id: "t8-long",
+    prompt: "Run this whole job, step by step, delegating as usual: 1) have src/tools reviewed against docs/SPEC-tools.md; "
+      + "2) have every discrepancy fixed so the code matches the spec (tests updated if needed); 3) have the fix reviewed again "
+      + "against the spec; 4) implement requirement DISP-14 of docs/SPEC-display.md with tests; 5) have DISP-14 reviewed against the spec. "
+      + "At the end, give me a short report of each step and confirm the test suite passes.",
+    budget: "8",
+    prepare: (f) => TASKS[0].prepare(f),
+    verify: (a, f) => {
+      const consts: [string, RegExp][] = [["src/tools/readRange.ts", /DEFAULT_MAX_LINES = 200\b/], ["src/tools/searchCompact.ts", /EXPAND_MAX_LINES = 150\b/],
+        ["src/tools/read.ts", /MULTI_CAP = 40_?000\b/]];
+      const fixed = consts.filter(([file, re]) => re.test(readFileSync(join(f, file), "utf8"))).length;
+      const t = TASKS[1].verify(a, f);
+      return { ok: fixed === 3 && t.ok, detail: `${fixed}/3 constants fixed · ${t.detail}` };
     },
   },
 ];
@@ -185,10 +202,11 @@ if (DRY) {
   }
   const f = mkdtempSync(join(tmpdir(), "te-ad-dry-")); fixture(f, VARIANTS[VARIANTS.length - 1]);
   for (const s of ["SPEC-tools.md", "SPEC-display.md"]) ok(readFileSync(join(f, "docs", s), "utf8").split("\n").length > 300, `docs/${s}: ${readFileSync(join(f, "docs", s), "utf8").split("\n").length} lines (> 300: hook threshold)`);
-  const cfg = { ...DEFAULT_CONFIG, hook: { mode: "redirect" as const, lineThreshold: 300 } };
+  const cfg = { ...DEFAULT_CONFIG, hook: { ...DEFAULT_CONFIG.hook, mode: "redirect" as const } };
   const bash = (command: string) => ({ session_id: "dry", cwd: f, tool_name: "Bash", tool_input: { command } });
-  for (const [c, want] of [["cat docs/SPEC-tools.md", "refused"], ["cat -n docs/SPEC-display.md", "refused"],
-    ["cd docs && cat SPEC-tools.md && cat SPEC-display.md", "refused"], ["sed -n '1,40p' docs/SPEC-tools.md", "pass"], ["cat package.json", "pass"]] as const) {
+  // Specs: many lines but ~3.6K tokens → below hook.minTokens (6000): no refused turn since v0.7.4.
+  for (const [c, want] of [["cat docs/SPEC-tools.md", "pass"], ["cat -n docs/SPEC-display.md", "pass"],
+    ["sed -n '1,40p' docs/SPEC-tools.md", "pass"], ["cat package.json", "pass"]] as const) {
     ok(decide(bash(c), cfg, {}, 0).action === want, `hook: \`${c}\` → ${want}`);
   }
   const base = spawnSync("node", ["--test", "test/"], { cwd: f, encoding: "utf8", timeout: 180_000, env: { ...process.env, TOKEN_ECO_HOME: mkdtempSync(join(tmpdir(), "te-ad-dry-home-")) } });
@@ -206,7 +224,7 @@ const HOME_NATIVE = mkdtempSync(join(tmpdir(), "te-ad-native-"));
 writeFileSync(join(HOME_NATIVE, "config.json"), JSON.stringify({ hook: { mode: "off" } }));
 // --report-only: rebuild ADOPTION.md from adoption-raw.json (e.g. after a run stopped early).
 const REPORT_ONLY = process.argv.includes("--report-only");
-const trials: Trial[] = REPORT_ONLY ? JSON.parse(readFileSync(join(HERE, "adoption-raw.json"), "utf8")) : [];
+const trials: Trial[] = REPORT_ONLY ? JSON.parse(readFileSync(join(HERE, `${OUT}-raw.json`), "utf8")) : [];
 let spent = trials.reduce((a, x) => a + x.cost, 0), infra = 0;
 outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for (let n = 0; n < TRIALS; n++) for (const v of VARIANTS) {
   const folder = mkdtempSync(join(tmpdir(), "te-ad-"));
@@ -214,7 +232,7 @@ outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for
   const home = v.plugin ? mkdtempSync(join(tmpdir(), "te-ad-eco-")) : HOME_NATIVE;
   // The copy installed on the account is always disabled (its "agent" setting would also apply to native runs, and
   // eco runs would load the plugin twice); eco runs load THIS checkout with --plugin-dir. Checked on 2026-10-27.
-  const args = ["-p", t.prompt, "--model", model, "--output-format", "json", "--max-budget-usd", BUDGET, "--dangerously-skip-permissions",
+  const args = ["-p", t.prompt, "--model", model, "--output-format", "json", "--max-budget-usd", t.budget ?? BUDGET, "--dangerously-skip-permissions",
     "--settings", JSON.stringify({ enabledPlugins: { "token-eco@token-eco-marketplace": false } }),
     ...(v.plugin ? ["--plugin-dir", PLUGIN, "--agent", "token-eco:eco"] : ["--disallowedTools", "mcp__plugin_token-eco_token-eco"])];
   process.stdout.write(`${model} ${t.id} #${n + 1} ${v.id}… `);
@@ -243,7 +261,7 @@ outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for
   console.log(row.error ? `ERROR (excluded) ${row.error}` : `${row.ok ? "OK" : "FAILED"} ${row.detail} · $${row.cost.toFixed(3)} · cov sub ${row.subEco}/${row.subEco + row.subNative} · bash reads ${row.bashReads}`);
   if (v.plugin) rmSync(home, { recursive: true, force: true });
   rmSync(folder, { recursive: true, force: true });
-  writeFileSync(join(HERE, "adoption-raw.json"), JSON.stringify(trials, null, 1));
+  writeFileSync(join(HERE, `${OUT}-raw.json`), JSON.stringify(trials, null, 1));
   infra = row.error && !/main agent|not sealed/.test(row.error) ? infra + 1 : 0;
   if (infra >= 2) { console.error("\nStopping: 2 Claude Code errors in a row (usage limit, login…). Partial report below."); break outer; }
   if (spent >= MAX_TOTAL) { console.error(`\nStopping: $${spent.toFixed(2)} spent (--max-total ${MAX_TOTAL}). Partial report below.`); break outer; }
@@ -265,7 +283,7 @@ for (const model of MODELS) for (const t of tasks) {
   }
 }
 const excluded = trials.filter((x) => x.error);
-writeFileSync(join(HERE, "ADOPTION.md"), [
+writeFileSync(join(HERE, `${OUT.toUpperCase()}.md`), [
   "# Adoption benchmark (multi-agent, headless Claude Code)", "",
   `${new Date().toISOString().slice(0, 10)} · ${TRIALS} trial(s) per cell · total spent $${spent.toFixed(2)} · fixture: server/ + 2 specs > 300 lines + orchestrator CLAUDE.md + reviewer/producer agents.`,
   "native = token-eco sealed off (tools disallowed, hook off) · eco-before = plugin + token-eco:eco + hook, reviewer `tools: Read, Grep, Glob` · eco-after = same, reviewer also gets token-eco read/search.", "",
@@ -275,4 +293,4 @@ writeFileSync(join(HERE, "ADOPTION.md"), [
   "The subagent model follows your settings (CLAUDE_CODE_SUBAGENT_MODEL): with Opus as main model the subagents may run on Sonnet, as in real use.",
   excluded.length ? `Excluded runs (${excluded.length}): ${excluded.map((x) => `${x.model}/${x.task}/${x.variant}: ${x.error}`).join(" · ")}` : "No run excluded.",
   "Few trials = high variance: a gap of a few % is noise.", ""].join("\n"));
-console.log(`\nReport: bench/ADOPTION.md (raw: bench/adoption-raw.json) · spent $${spent.toFixed(2)}`);
+console.log(`\nReport: bench/${OUT.toUpperCase()}.md (raw: bench/${OUT}-raw.json) · spent $${spent.toFixed(2)}`);
