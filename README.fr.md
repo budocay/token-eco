@@ -221,6 +221,27 @@ relecteurs équipés de `read`/`search` : un relecteur frontend a utilisé token
 fichiers (62 contre 50 ; 0 % avant) et le producteur frontend pour 21 % (50 contre 191, surtout des `Edit` natifs).
 Un projet, quelques heures : à confirmer dans les semaines qui viennent avec le même dashboard.
 
+**Bench d'adoption** (`npm run bench:adoption -- [--dry] [--models sonnet,opus] [--trials 3]`, payant sauf `--dry` ;
+→ `server/bench/ADOPTION.md`). Un petit projet multi-agents comme les vrais : un `CLAUDE.md` d'orchestrateur qui
+délègue, un agent `reviewer` en lecture seule avec une liste `tools:`, un agent `producer`, deux specs de 454 lignes.
+Tâches : t6 = trouver 3 écarts spec/code via le relecteur, t7 = implémenter une exigence de spec via le producteur
+(test caché). La copie du plugin installée sur le compte est désactivée à chaque run (sinon son `"agent"` s'applique
+aussi aux runs natifs). 2026-10-27, v0.7.3, 3 essais par case, 36/36 réussites, 11,40 $ :
+
+| Modèle principal | Tâche | Coût vs natif : eco-before / eco-after | Couverture relecteur : avant → après | Couverture producteur | Lectures via Bash natif → eco |
+|---|---|---|---|---|---|
+| Sonnet | t6 relecture | +22 % / +22 % | 0 % → **67 %** | – | 0 → 0 |
+| Sonnet | t7 fonctionnalité | +1 % / −1 % | – | 100 % | 3,3 (16 Ko) → ≤ 1 (≤ 1 Ko) |
+| Opus | t6 relecture | +4 % / −6 % | 0 % → **39 %** | – | 0 → 0 |
+| Opus | t7 fonctionnalité | −1 % / −3 % | – | 90-100 % | 3,0 (15 Ko) → ≤ 2 (≤ 2 Ko) |
+
+(Les sous-agents tournaient sur Sonnet dans les deux cas, via `CLAUDE_CODE_SUBAGENT_MODEL`, comme en usage réel.)
+Donner `read`/`search` au relecteur le fait s'en servir ; le producteur s'en sert presque toujours ; les lectures via
+Bash disparaissent presque. Mais pas d'économie mesurable sur ces tâches courtes : le +22 % de la relecture Sonnet est
+le même avec ou sans relecteur équipé, c'est donc le coût fixe du prompt de l'agent eco, de la consigne et des schémas
+d'outils (~0,04 $ par session) sur une tâche de 3 tours de sous-agent. Une économie ne peut venir que des sessions
+longues (lectures complètes répétées) ; ce n'est pas démontré ici.
+
 **Leçon** : avec un plugin comme celui-ci, l'adoption compte plus que la qualité des outils. Vérifie la colonne
 **Agent** et les cartes de couverture avant de lire la moindre économie.
 

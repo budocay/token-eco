@@ -210,6 +210,26 @@ plugin was removed and the reviewers got `read`/`search`: a frontend reviewer us
 calls (62 vs 50; 0% before) and the frontend producer for 21% (50 vs 191, mostly native `Edit`). One project, a few
 hours: to confirm over the next weeks with the same dashboard.
 
+**Adoption benchmark** (`npm run bench:adoption -- [--dry] [--models sonnet,opus] [--trials 3]`, paid except
+`--dry`; → `server/bench/ADOPTION.md`). A small multi-agent project like the real ones: an orchestrator `CLAUDE.md`
+that delegates, a read-only `reviewer` agent with a `tools:` list, a `producer` agent, two 454-line specs. Tasks:
+t6 = find 3 spec/code discrepancies through the reviewer, t7 = implement a spec requirement through the producer
+(hidden test). The copy of the plugin installed on the account is disabled in every run (otherwise its `"agent"`
+also applies to the native runs). 2026-10-27, v0.7.3, 3 trials per cell, 36/36 successes, $11.40:
+
+| Main model | Task | Cost vs native: eco-before / eco-after | Reviewer coverage: before → after | Producer coverage | Bash file reads native → eco |
+|---|---|---|---|---|---|
+| Sonnet | t6 review | +22% / +22% | 0% → **67%** | – | 0 → 0 |
+| Sonnet | t7 feature | +1% / −1% | – | 100% | 3.3 (16 KB) → ≤ 1 (≤ 1 KB) |
+| Opus | t6 review | +4% / −6% | 0% → **39%** | – | 0 → 0 |
+| Opus | t7 feature | −1% / −3% | – | 90-100% | 3.0 (15 KB) → ≤ 2 (≤ 2 KB) |
+
+(Subagents ran on Sonnet in both cases, through `CLAUDE_CODE_SUBAGENT_MODEL`, as in real use.) Giving the reviewer
+`read`/`search` makes it use them; the producer uses them almost always; Bash file reads nearly disappear. But no
+measurable saving on these short tasks: the +22% on the Sonnet review is the same with or without the equipped
+reviewer, so it is the fixed cost of the eco agent prompt, guidance and tool schemas (~$0.04 per session) on a
+task of 3 subagent turns. A saving can only come from long sessions (repeated whole-file reads); not shown here.
+
 **Lesson**: with a plugin like this one, adoption matters more than tool quality. Check the **Agent** column and the
 coverage cards before reading any saving.
 
