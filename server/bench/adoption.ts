@@ -10,7 +10,7 @@
  * Measures, from the Claude Code logs of each trial (subagents included): cost, turns, success, coverage
  * (token-eco vs built-in file tools, main / subagents), file reads through Bash, hook redirects, main agent.
  *
- * Usage: node bench/adoption.ts [--dry] [--models sonnet,opus] [--trials 3] [--tasks t6,t7]
+ * Usage: node bench/adoption.ts [--dry | --report-only] [--models sonnet,opus] [--trials 3] [--tasks t6,t7]
  *          [--variants native,eco-before,eco-after] [--budget 4] [--max-total 100]
  * Output: bench/ADOPTION.md + bench/adoption-raw.json
  */
@@ -204,9 +204,11 @@ if (DRY) {
 // ---------- Runs ----------
 const HOME_NATIVE = mkdtempSync(join(tmpdir(), "te-ad-native-"));
 writeFileSync(join(HOME_NATIVE, "config.json"), JSON.stringify({ hook: { mode: "off" } }));
-const trials: Trial[] = [];
-let spent = 0, infra = 0;
-outer: for (const model of MODELS) for (const t of tasks) for (let n = 0; n < TRIALS; n++) for (const v of VARIANTS) {
+// --report-only: rebuild ADOPTION.md from adoption-raw.json (e.g. after a run stopped early).
+const REPORT_ONLY = process.argv.includes("--report-only");
+const trials: Trial[] = REPORT_ONLY ? JSON.parse(readFileSync(join(HERE, "adoption-raw.json"), "utf8")) : [];
+let spent = trials.reduce((a, x) => a + x.cost, 0), infra = 0;
+outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for (let n = 0; n < TRIALS; n++) for (const v of VARIANTS) {
   const folder = mkdtempSync(join(tmpdir(), "te-ad-"));
   fixture(folder, v); t.prepare(folder);
   const home = v.plugin ? mkdtempSync(join(tmpdir(), "te-ad-eco-")) : HOME_NATIVE;
