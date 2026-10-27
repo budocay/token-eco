@@ -9,9 +9,10 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { PRICES, type ModelPrice } from "./pricing.ts";
+import { projectRoot } from "./project.ts";
 
 export interface SessionTotals {
-  id: string; project: string; start: string; end: string; model: string;
+  id: string; project: string; workdir?: string; start: string; end: string; model: string;
   turns: number; subagentTurns: number; input: number; write5m: number; write1h: number; cacheRead: number;
   output: number; tokens: number; cost: number; peakContext: number; ecoCalls: number;
   tools: Record<string, number>; unpriced: string[];
@@ -132,7 +133,9 @@ const cache = new Map<string, { key: string; t: SessionTotals }>();
 export function listSessions(scope: { project?: string; days?: number | null } = {}, root = projectsDir()): SessionTotals[] {
   if (!existsSync(root)) return [];
   const since = scope.days ? Date.now() - scope.days * 86_400_000 : 0;
-  const dirs = scope.project ? [encodeProject(scope.project)] : readdirSync(root);
+  // Every folder is scanned even for one project: its worktrees / sub-folders have their own log folders.
+  const dirs = readdirSync(root);
+  const want = scope.project ? projectRoot(scope.project) : "";
   const out: SessionTotals[] = [];
   for (const d of dirs) {
     const dir = join(root, d);
@@ -144,8 +147,12 @@ export function listSessions(scope: { project?: string; days?: number | null } =
       if (st.mtimeMs < since) continue;
       const key = `${st.mtimeMs}|${st.size}`;
       let hit = cache.get(path);
-      if (!hit || hit.key !== key) { hit = { key, t: sessionTotals(path) }; cache.set(path, hit); }
-      if (hit.t.turns && (!scope.project || resolve(hit.t.project) === resolve(scope.project))) out.push(hit.t);
+      if (!hit || hit.key !== key) {
+        const t = sessionTotals(path);
+        if (t.project) { t.workdir = t.project; t.project = projectRoot(t.project); }
+        hit = { key, t }; cache.set(path, hit);
+      }
+      if (hit.t.turns && (!want || hit.t.project === want)) out.push(hit.t);
     }
   }
   return out.sort((a, b) => b.end.localeCompare(a.end));

@@ -4,7 +4,7 @@ import {
 import { effectiveModel, readConfig, toDollars, type Config } from "./config.ts";
 import { PRICES, PRICES_CHECKED, PRICES_SOURCE, savedTokenRate } from "./pricing.ts";
 import { CHARS_PER_TOKEN } from "./tokens.ts";
-import { insights } from "./insights.ts";
+import { insights, isBench } from "./insights.ts";
 
 type WithDollars<T> = T & { dollars: number };
 
@@ -46,8 +46,9 @@ export function statistics(q: StatsQuery = {}) {
     byDay: byDay(scope.days ?? 3650, scope.project).map($),
     stack: { by: scope.project ? "tool" : "project", rows: byDayAndKey(scope.project ? "tool" : "project", scope) },
     byTool: byKey("tool", scope).map($),
-    byProject: byKey("project", scope).map($),
-    projects: projects().map($),
+    // Benchmark / temp folders (config excludeProjects) stay out of the project lists.
+    byProject: byKey("project", scope).filter((p) => !isBench(p.key, cfg)).map($),
+    projects: projects().filter((p) => !isBench(p.key, cfg)).map($),
     recent: recent(30, scope),
     redirections: { day: redirectStats("day"), week: redirectStats("week"), total: redirectStats("total") },
   };

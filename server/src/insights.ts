@@ -9,6 +9,7 @@
 import { readConfig, saveAutoModel, type Config } from "./config.ts";
 import { callsInWindow } from "./db.ts";
 import { PRICES, savedTokenRate } from "./pricing.ts";
+import { shortName } from "./project.ts";
 import { listSessions, modelKey, type RawTokens, type SessionTotals } from "./sessions.ts";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -28,7 +29,6 @@ export interface SessionRow {
 }
 
 export const isBench = (project: string, cfg: Config) => cfg.excludeProjects.some((p) => p && project.includes(p));
-const shortName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 const pct = (c: Coverage) => (c.eco + c.native ? c.eco / (c.eco + c.native) : null);
 
 export function median(a: number[]): number {

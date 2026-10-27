@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { dataDir } from "./config.ts";
+import { projectRoot } from "./project.ts";
 
 export interface Call {
   project: string;
@@ -78,7 +79,19 @@ export function openDb(filePath: string = join(dataDir(), "eco.db")): DatabaseSy
     WHERE tool IN ('apercu', 'lire_symbole', 'lire_plage', 'outline', 'read_symbol', 'read_range',
                    'chercher_compact', 'search_compact', 'editer_groupe', 'batch_edit');
   `);
+  normalizeProjects(db);
   return db;
+}
+
+/** project = main git repo (sub-folders and worktrees grouped), workdir = exact folder of the call.
+ *  Also fixes rows written by older versions (workdir NULL). */
+function normalizeProjects(d: DatabaseSync): void {
+  const cols = (d.prepare("PRAGMA table_info(calls)").all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes("workdir")) d.exec("ALTER TABLE calls ADD COLUMN workdir TEXT");
+  const raw = d.prepare("SELECT DISTINCT project FROM calls WHERE workdir IS NULL").all() as { project: string }[];
+  if (!raw.length) return;
+  const upd = d.prepare("UPDATE calls SET workdir = project, project = ? WHERE workdir IS NULL AND project = ?");
+  for (const { project } of raw) upd.run(projectRoot(project), project);
 }
 
 export function closeDb(): void {
@@ -88,9 +101,9 @@ export function closeDb(): void {
 
 export function record(a: Call, when: Date = new Date()): void {
   openDb()
-    .prepare(`INSERT INTO calls (ts, project, tool, returned_tokens, native_tokens_est, duration_ms, details)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(when.toISOString(), a.project, a.tool, a.returnedTokens, a.nativeTokens, a.durationMs ?? null,
+    .prepare(`INSERT INTO calls (ts, project, workdir, tool, returned_tokens, native_tokens_est, duration_ms, details)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(when.toISOString(), projectRoot(a.project), a.project, a.tool, a.returnedTokens, a.nativeTokens, a.durationMs ?? null,
       a.details ? JSON.stringify(a.details) : null);
 }
 

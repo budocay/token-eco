@@ -73,7 +73,7 @@ function compact(command2, raw, exitCode) {
 
 // src/db.ts
 import { DatabaseSync } from "node:sqlite";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 
 // src/config.ts
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -83,6 +83,52 @@ function dataDir() {
   const d = process.env.TOKEN_ECO_HOME ?? join(homedir(), ".token-eco");
   mkdirSync(d, { recursive: true });
   return d;
+}
+
+// src/project.ts
+import { execFileSync } from "node:child_process";
+import { existsSync as existsSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { basename, dirname, isAbsolute, join as join2, resolve } from "node:path";
+var cache = null;
+var cacheFile = () => join2(dataDir(), "projects.json");
+function load() {
+  if (cache) return cache;
+  try {
+    cache = JSON.parse(readFileSync2(cacheFile(), "utf8"));
+  } catch {
+    cache = {};
+  }
+  return cache;
+}
+function git(dir, ...args) {
+  try {
+    return execFileSync("git", ["-C", dir, "rev-parse", ...args], { encoding: "utf8", timeout: 2e3, stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+function compute(dir) {
+  if (!existsSync2(dir)) return dir;
+  const common = git(dir, "--git-common-dir");
+  if (common) {
+    const abs = isAbsolute(common) ? common : resolve(dir, common);
+    if (basename(abs) === ".git") return dirname(abs);
+  }
+  return git(dir, "--show-toplevel") ?? dir;
+}
+function projectRoot(dir) {
+  const d = resolve(dir);
+  const c = load();
+  if (c[d]) return c[d];
+  const root = compute(d);
+  if (existsSync2(d)) {
+    c[d] = root;
+    try {
+      writeFileSync2(cacheFile(), JSON.stringify(c));
+    } catch {
+    }
+  }
+  return root;
 }
 
 // src/db.ts
@@ -127,7 +173,7 @@ function migrate(d) {
     d.exec("UPDATE redirections SET outcome = CASE outcome WHEN 'refus' THEN 'refused' WHEN 'repli' THEN 'fallback' ELSE outcome END");
   }
 }
-function openDb(filePath = join2(dataDir(), "eco.db")) {
+function openDb(filePath = join3(dataDir(), "eco.db")) {
   if (db) return db;
   db = new DatabaseSync(filePath);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 2000;");
@@ -158,12 +204,22 @@ function openDb(filePath = join2(dataDir(), "eco.db")) {
     WHERE tool IN ('apercu', 'lire_symbole', 'lire_plage', 'outline', 'read_symbol', 'read_range',
                    'chercher_compact', 'search_compact', 'editer_groupe', 'batch_edit');
   `);
+  normalizeProjects(db);
   return db;
 }
+function normalizeProjects(d) {
+  const cols = d.prepare("PRAGMA table_info(calls)").all().map((c) => c.name);
+  if (!cols.includes("workdir")) d.exec("ALTER TABLE calls ADD COLUMN workdir TEXT");
+  const raw = d.prepare("SELECT DISTINCT project FROM calls WHERE workdir IS NULL").all();
+  if (!raw.length) return;
+  const upd = d.prepare("UPDATE calls SET workdir = project, project = ? WHERE workdir IS NULL AND project = ?");
+  for (const { project } of raw) upd.run(projectRoot(project), project);
+}
 function record(a, when = /* @__PURE__ */ new Date()) {
-  openDb().prepare(`INSERT INTO calls (ts, project, tool, returned_tokens, native_tokens_est, duration_ms, details)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+  openDb().prepare(`INSERT INTO calls (ts, project, workdir, tool, returned_tokens, native_tokens_est, duration_ms, details)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
     when.toISOString(),
+    projectRoot(a.project),
     a.project,
     a.tool,
     a.returnedTokens,

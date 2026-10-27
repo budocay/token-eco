@@ -1,7 +1,7 @@
 // src/hook.ts
-import { readFileSync as readFileSync2, statSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3, statSync, writeFileSync as writeFileSync3 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { dirname, extname as extname2, isAbsolute, join as join3 } from "node:path";
+import { dirname as dirname2, extname as extname2, isAbsolute as isAbsolute2, join as join4 } from "node:path";
 
 // src/config.ts
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -66,7 +66,55 @@ function readConfig() {
 
 // src/db.ts
 import { DatabaseSync } from "node:sqlite";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
+
+// src/project.ts
+import { execFileSync } from "node:child_process";
+import { existsSync as existsSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { basename, dirname, isAbsolute, join as join2, resolve } from "node:path";
+var cache = null;
+var cacheFile = () => join2(dataDir(), "projects.json");
+function load() {
+  if (cache) return cache;
+  try {
+    cache = JSON.parse(readFileSync2(cacheFile(), "utf8"));
+  } catch {
+    cache = {};
+  }
+  return cache;
+}
+function git(dir, ...args) {
+  try {
+    return execFileSync("git", ["-C", dir, "rev-parse", ...args], { encoding: "utf8", timeout: 2e3, stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+function compute(dir) {
+  if (!existsSync2(dir)) return dir;
+  const common = git(dir, "--git-common-dir");
+  if (common) {
+    const abs = isAbsolute(common) ? common : resolve(dir, common);
+    if (basename(abs) === ".git") return dirname(abs);
+  }
+  return git(dir, "--show-toplevel") ?? dir;
+}
+function projectRoot(dir) {
+  const d = resolve(dir);
+  const c = load();
+  if (c[d]) return c[d];
+  const root = compute(d);
+  if (existsSync2(d)) {
+    c[d] = root;
+    try {
+      writeFileSync2(cacheFile(), JSON.stringify(c));
+    } catch {
+    }
+  }
+  return root;
+}
+
+// src/db.ts
 var db = null;
 function migrate(d) {
   const has = (t) => !!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
@@ -108,7 +156,7 @@ function migrate(d) {
     d.exec("UPDATE redirections SET outcome = CASE outcome WHEN 'refus' THEN 'refused' WHEN 'repli' THEN 'fallback' ELSE outcome END");
   }
 }
-function openDb(filePath = join2(dataDir(), "eco.db")) {
+function openDb(filePath = join3(dataDir(), "eco.db")) {
   if (db) return db;
   db = new DatabaseSync(filePath);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 2000;");
@@ -139,12 +187,22 @@ function openDb(filePath = join2(dataDir(), "eco.db")) {
     WHERE tool IN ('apercu', 'lire_symbole', 'lire_plage', 'outline', 'read_symbol', 'read_range',
                    'chercher_compact', 'search_compact', 'editer_groupe', 'batch_edit');
   `);
+  normalizeProjects(db);
   return db;
 }
+function normalizeProjects(d) {
+  const cols = d.prepare("PRAGMA table_info(calls)").all().map((c) => c.name);
+  if (!cols.includes("workdir")) d.exec("ALTER TABLE calls ADD COLUMN workdir TEXT");
+  const raw = d.prepare("SELECT DISTINCT project FROM calls WHERE workdir IS NULL").all();
+  if (!raw.length) return;
+  const upd = d.prepare("UPDATE calls SET workdir = project, project = ? WHERE workdir IS NULL AND project = ?");
+  for (const { project } of raw) upd.run(projectRoot(project), project);
+}
 function record(a, when = /* @__PURE__ */ new Date()) {
-  openDb().prepare(`INSERT INTO calls (ts, project, tool, returned_tokens, native_tokens_est, duration_ms, details)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+  openDb().prepare(`INSERT INTO calls (ts, project, workdir, tool, returned_tokens, native_tokens_est, duration_ms, details)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
     when.toISOString(),
+    projectRoot(a.project),
     a.project,
     a.tool,
     a.returnedTokens,
@@ -178,9 +236,9 @@ function family(command) {
 import { readFile } from "node:fs/promises";
 
 // src/types.ts
-import { resolve } from "node:path";
+import { resolve as resolve2 } from "node:path";
 function absolutePath(file, cwd = process.cwd()) {
-  return resolve(cwd, file);
+  return resolve2(cwd, file);
 }
 function splitLines(content) {
   const lines = content.split(/\r?\n/);
@@ -198,7 +256,7 @@ function truncate(line, max = 200) {
 }
 
 // src/languages/engine.ts
-import { basename, extname } from "node:path";
+import { basename as basename2, extname } from "node:path";
 
 // src/languages/profiles.ts
 var TOK = "(?:<[^<>;()]*(?:<[^<>;()]*>[^<>;()]*)*>|[\\w~*&][\\w:<>,*&\\[\\]~?.]*)";
@@ -718,7 +776,7 @@ var PROFILES = [
 var BY_EXT = /* @__PURE__ */ new Map();
 for (const p of PROFILES) for (const e of p.ext ?? []) if (!BY_EXT.has(e)) BY_EXT.set(e, p);
 function profileFor(file, start = "") {
-  const name = basename(file);
+  const name = basename2(file);
   const byName = PROFILES.find((p) => p.files?.test(name));
   if (byName) return byName;
   const ext = extname(name).toLowerCase();
@@ -1047,7 +1105,7 @@ function splitCompound(command) {
 function countLines(filePath) {
   const size = statSync(filePath).size;
   if (size > 5e7) return Infinity;
-  const b = readFileSync2(filePath);
+  const b = readFileSync3(filePath);
   if (b.subarray(0, 8e3).includes(0)) return 0;
   let n = 0;
   for (let i = 0; i < b.length; i++) if (b[i] === 10) n++;
@@ -1064,11 +1122,11 @@ function ruleMatches(rule, command) {
 }
 function readRules(cwd) {
   const r = { allow: [], deny: [] };
-  const files = [join3(homedir2(), ".claude/settings.json")];
-  if (cwd) files.push(join3(cwd, ".claude/settings.json"), join3(cwd, ".claude/settings.local.json"));
+  const files = [join4(homedir2(), ".claude/settings.json")];
+  if (cwd) files.push(join4(cwd, ".claude/settings.json"), join4(cwd, ".claude/settings.local.json"));
   for (const f of files) {
     try {
-      const p = JSON.parse(readFileSync2(f, "utf8")).permissions ?? {};
+      const p = JSON.parse(readFileSync3(f, "utf8")).permissions ?? {};
       r.allow.push(...p.allow ?? []);
       r.deny.push(...p.deny ?? []);
     } catch {
@@ -1084,9 +1142,9 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
   const cat = e.tool_name === "Bash" && !ti.run_in_background ? /^(?:cd\s+("[^"]+"|'[^']+'|[^\s;&|<>]+)\s*&&\s*)?cat\s+("[^"]+"|'[^']+'|[^\s;&|<>$`*?-][^\s;&|<>$`*?]*)\s*$/.exec(String(ti.command ?? "").trim()) : null;
   if (cat) {
     const unq = (s) => s.replace(/^(["'])(.*)\1$/, "$2");
-    const dir = cat[1] ? isAbsolute(unq(cat[1])) || !e.cwd ? unq(cat[1]) : join3(e.cwd, unq(cat[1])) : e.cwd;
+    const dir = cat[1] ? isAbsolute2(unq(cat[1])) || !e.cwd ? unq(cat[1]) : join4(e.cwd, unq(cat[1])) : e.cwd;
     const f = unq(cat[2]);
-    const abs = isAbsolute(f) || !dir ? f : join3(dir, f);
+    const abs = isAbsolute2(f) || !dir ? f : join4(dir, f);
     let n = 0;
     try {
       n = NON_TEXT.has(extname2(abs).toLowerCase()) ? 0 : linesOf(abs);
@@ -1126,7 +1184,7 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
   if (e.tool_name === "Read") {
     const f = String(ti.file_path ?? "");
     if (!f || ti.offset != null || ti.limit != null || NON_TEXT.has(extname2(f).toLowerCase())) return { action: "pass" };
-    file = isAbsolute(f) || !e.cwd ? f : join3(e.cwd, f);
+    file = isAbsolute2(f) || !e.cwd ? f : join4(e.cwd, f);
     let n;
     try {
       n = linesOf(file);
@@ -1170,11 +1228,11 @@ async function main() {
     if (config.hook.mode !== "off") process.stdout.write(guidanceOutput(e.hook_event_name));
     return;
   }
-  const runJs = join3(dirname(process.argv[1]), "run.js");
-  const stateFile = join3(dataDir(), "hook-state.json");
+  const runJs = join4(dirname2(process.argv[1]), "run.js");
+  const stateFile = join4(dataDir(), "hook-state.json");
   let state = {};
   try {
-    state = JSON.parse(readFileSync2(stateFile, "utf8"));
+    state = JSON.parse(readFileSync3(stateFile, "utf8"));
   } catch {
   }
   const now = Date.now();
@@ -1190,7 +1248,7 @@ async function main() {
   }
   if (d.action === "fallback") delete state[d.key];
   else state[d.key] = now;
-  writeFileSync2(stateFile, JSON.stringify(state));
+  writeFileSync3(stateFile, JSON.stringify(state));
   const [, tool, ...rest] = d.key.split("|");
   try {
     recordRedirect(e.session_id ?? "", tool, rest.join("|"), d.action);
@@ -1199,7 +1257,7 @@ async function main() {
   if (d.action === "fallback") {
     if (tool === "Read") {
       try {
-        const native = nativeReadChars(splitLines(readFileSync2(rest.join("|"), "utf8")));
+        const native = nativeReadChars(splitLines(readFileSync3(rest.join("|"), "utf8")));
         measureRead(e, rest.join("|"), estimateTokens(native), 0);
       } catch {
       }

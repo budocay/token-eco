@@ -2982,7 +2982,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve5.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3009,7 +3009,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve4(root, ref) {
+    function resolve5(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3873,7 +3873,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve4(baseURI, relativeURI, options) {
+    function resolve5(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -4264,7 +4264,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve4,
+      resolve: resolve5,
       resolveComponent,
       equal,
       serialize,
@@ -7350,9 +7350,63 @@ var init_config = __esm({
   }
 });
 
+// src/project.ts
+import { execFileSync } from "node:child_process";
+import { existsSync as existsSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { basename as basename2, dirname, isAbsolute, join as join3, resolve as resolve2 } from "node:path";
+function load() {
+  if (cache) return cache;
+  try {
+    cache = JSON.parse(readFileSync2(cacheFile(), "utf8"));
+  } catch {
+    cache = {};
+  }
+  return cache;
+}
+function git(dir, ...args) {
+  try {
+    return execFileSync("git", ["-C", dir, "rev-parse", ...args], { encoding: "utf8", timeout: 2e3, stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+function compute(dir) {
+  if (!existsSync2(dir)) return dir;
+  const common = git(dir, "--git-common-dir");
+  if (common) {
+    const abs = isAbsolute(common) ? common : resolve2(dir, common);
+    if (basename2(abs) === ".git") return dirname(abs);
+  }
+  return git(dir, "--show-toplevel") ?? dir;
+}
+function projectRoot(dir) {
+  const d = resolve2(dir);
+  const c = load();
+  if (c[d]) return c[d];
+  const root = compute(d);
+  if (existsSync2(d)) {
+    c[d] = root;
+    try {
+      writeFileSync2(cacheFile(), JSON.stringify(c));
+    } catch {
+    }
+  }
+  return root;
+}
+var cache, cacheFile, shortName;
+var init_project = __esm({
+  "src/project.ts"() {
+    "use strict";
+    init_config();
+    cache = null;
+    cacheFile = () => join3(dataDir(), "projects.json");
+    shortName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+  }
+});
+
 // src/db.ts
 import { DatabaseSync } from "node:sqlite";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 function migrate(d) {
   const has = (t) => !!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
   const cols = (t) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
@@ -7393,7 +7447,7 @@ function migrate(d) {
     d.exec("UPDATE redirections SET outcome = CASE outcome WHEN 'refus' THEN 'refused' WHEN 'repli' THEN 'fallback' ELSE outcome END");
   }
 }
-function openDb(filePath = join3(dataDir(), "eco.db")) {
+function openDb(filePath = join4(dataDir(), "eco.db")) {
   if (db) return db;
   db = new DatabaseSync(filePath);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 2000;");
@@ -7424,12 +7478,22 @@ function openDb(filePath = join3(dataDir(), "eco.db")) {
     WHERE tool IN ('apercu', 'lire_symbole', 'lire_plage', 'outline', 'read_symbol', 'read_range',
                    'chercher_compact', 'search_compact', 'editer_groupe', 'batch_edit');
   `);
+  normalizeProjects(db);
   return db;
 }
+function normalizeProjects(d) {
+  const cols = d.prepare("PRAGMA table_info(calls)").all().map((c) => c.name);
+  if (!cols.includes("workdir")) d.exec("ALTER TABLE calls ADD COLUMN workdir TEXT");
+  const raw = d.prepare("SELECT DISTINCT project FROM calls WHERE workdir IS NULL").all();
+  if (!raw.length) return;
+  const upd = d.prepare("UPDATE calls SET workdir = project, project = ? WHERE workdir IS NULL AND project = ?");
+  for (const { project } of raw) upd.run(projectRoot(project), project);
+}
 function record2(a, when = /* @__PURE__ */ new Date()) {
-  openDb().prepare(`INSERT INTO calls (ts, project, tool, returned_tokens, native_tokens_est, duration_ms, details)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+  openDb().prepare(`INSERT INTO calls (ts, project, workdir, tool, returned_tokens, native_tokens_est, duration_ms, details)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
     when.toISOString(),
+    projectRoot(a.project),
     a.project,
     a.tool,
     a.returnedTokens,
@@ -7495,6 +7559,7 @@ var init_db = __esm({
   "src/db.ts"() {
     "use strict";
     init_config();
+    init_project();
     db = null;
     SUMS = `COUNT(*) AS calls,
   COALESCE(SUM(returned_tokens), 0) AS returned,
@@ -7522,9 +7587,9 @@ var init_tokens = __esm({
 });
 
 // src/sessions.ts
-import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
+import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync3, statSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { join as join4, resolve as resolve2 } from "node:path";
+import { join as join5, resolve as resolve3 } from "node:path";
 function priceFor(model, forced) {
   return PRICES[forced ?? modelKey(model)];
 }
@@ -7556,7 +7621,7 @@ function emptyTotals(id = "", project = "") {
 function addLog(t, file, isSub, opts = {}) {
   const seenMsg = /* @__PURE__ */ new Set(), seenTool = /* @__PURE__ */ new Set();
   let prevReply = 0;
-  for (const line of readFileSync2(file, "utf8").split("\n")) {
+  for (const line of readFileSync3(file, "utf8").split("\n")) {
     if (!line.trim()) continue;
     let o;
     try {
@@ -7642,8 +7707,8 @@ function addLog(t, file, isSub, opts = {}) {
   }
 }
 function subagentLogs(mainLog) {
-  const d = join4(mainLog.replace(/\.jsonl$/, ""), "subagents");
-  return existsSync2(d) ? readdirSync(d).filter((f) => f.endsWith(".jsonl")).map((f) => join4(d, f)) : [];
+  const d = join5(mainLog.replace(/\.jsonl$/, ""), "subagents");
+  return existsSync3(d) ? readdirSync(d).filter((f) => f.endsWith(".jsonl")).map((f) => join5(d, f)) : [];
 }
 function sessionTotals(mainLog, opts = {}) {
   const t = emptyTotals(mainLog.split(/[\\/]/).pop().replace(/\.jsonl$/, ""));
@@ -7652,12 +7717,13 @@ function sessionTotals(mainLog, opts = {}) {
   return t;
 }
 function listSessions(scope = {}, root = projectsDir()) {
-  if (!existsSync2(root)) return [];
+  if (!existsSync3(root)) return [];
   const since = scope.days ? Date.now() - scope.days * 864e5 : 0;
-  const dirs = scope.project ? [encodeProject(scope.project)] : readdirSync(root);
+  const dirs = readdirSync(root);
+  const want = scope.project ? projectRoot(scope.project) : "";
   const out = [];
   for (const d of dirs) {
-    const dir = join4(root, d);
+    const dir = join5(root, d);
     let files;
     try {
       files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
@@ -7665,31 +7731,36 @@ function listSessions(scope = {}, root = projectsDir()) {
       continue;
     }
     for (const f of files) {
-      const path = join4(dir, f);
+      const path = join5(dir, f);
       const st = statSync(path);
       if (st.mtimeMs < since) continue;
       const key = `${st.mtimeMs}|${st.size}`;
-      let hit = cache.get(path);
+      let hit = cache2.get(path);
       if (!hit || hit.key !== key) {
-        hit = { key, t: sessionTotals(path) };
-        cache.set(path, hit);
+        const t = sessionTotals(path);
+        if (t.project) {
+          t.workdir = t.project;
+          t.project = projectRoot(t.project);
+        }
+        hit = { key, t };
+        cache2.set(path, hit);
       }
-      if (hit.t.turns && (!scope.project || resolve2(hit.t.project) === resolve2(scope.project))) out.push(hit.t);
+      if (hit.t.turns && (!want || hit.t.project === want)) out.push(hit.t);
     }
   }
   return out.sort((a, b) => b.end.localeCompare(a.end));
 }
-var REBUILD_GAP_MS, projectsDir, encodeProject, ECO_TOOL, modelKey, cache;
+var REBUILD_GAP_MS, projectsDir, ECO_TOOL, modelKey, cache2;
 var init_sessions = __esm({
   "src/sessions.ts"() {
     "use strict";
     init_pricing();
+    init_project();
     REBUILD_GAP_MS = 5 * 6e4;
-    projectsDir = () => join4(process.env.CLAUDE_CONFIG_DIR ?? join4(homedir2(), ".claude"), "projects");
-    encodeProject = (dir) => resolve2(dir).replace(/[^a-zA-Z0-9]/g, "-");
+    projectsDir = () => join5(process.env.CLAUDE_CONFIG_DIR ?? join5(homedir2(), ".claude"), "projects");
     ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
     modelKey = (model) => model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2");
-    cache = /* @__PURE__ */ new Map();
+    cache2 = /* @__PURE__ */ new Map();
   }
 });
 
@@ -7706,9 +7777,9 @@ __export(insights_exports, {
   median: () => median,
   sessionRow: () => sessionRow
 });
-import { readFileSync as readFileSync3 } from "node:fs";
+import { readFileSync as readFileSync4 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 function median(a) {
   if (!a.length) return 0;
   const b = [...a].sort((x, y) => x - y), m = b.length >> 1;
@@ -7784,10 +7855,10 @@ function dominantModel(list) {
   }
   return Object.entries(by).sort((a, b) => b[1] - a[1])[0]?.[0];
 }
-function claudeEnv(home = process.env.CLAUDE_CONFIG_DIR ?? join5(homedir3(), ".claude")) {
+function claudeEnv(home = process.env.CLAUDE_CONFIG_DIR ?? join6(homedir3(), ".claude")) {
   let env = {};
   try {
-    env = JSON.parse(readFileSync3(join5(home, "settings.json"), "utf8")).env ?? {};
+    env = JSON.parse(readFileSync4(join6(home, "settings.json"), "utf8")).env ?? {};
   } catch {
   }
   const keys = [
@@ -7868,18 +7939,18 @@ function insights(f = {}) {
     sessions: rows.slice(0, 40)
   };
 }
-var ECO_FILE, NATIVE_FILE, isBench, shortName, pct, usesEco, CHEAP_SUB, priceRaw;
+var ECO_FILE, NATIVE_FILE, isBench, pct, usesEco, CHEAP_SUB, priceRaw;
 var init_insights = __esm({
   "src/insights.ts"() {
     "use strict";
     init_config();
     init_db();
     init_pricing();
+    init_project();
     init_sessions();
     ECO_FILE = ["eco:read", "eco:search", "eco:edit"];
     NATIVE_FILE = ["Read", "Grep", "Glob", "Edit", "MultiEdit"];
     isBench = (project, cfg) => cfg.excludeProjects.some((p) => p && project.includes(p));
-    shortName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
     pct = (c) => c.eco + c.native ? c.eco / (c.eco + c.native) : null;
     usesEco = (r) => r.main.eco + r.sub.eco + r.bash.compacted > 0;
     CHEAP_SUB = "claude-sonnet-5.5";
@@ -7896,16 +7967,16 @@ __export(audit_exports, {
   audit: () => audit,
   auditText: () => auditText
 });
-import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync4 } from "node:fs";
+import { existsSync as existsSync4, readdirSync as readdirSync2, readFileSync as readFileSync5 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
-import { dirname, join as join6, resolve as resolve3 } from "node:path";
+import { dirname as dirname2, join as join7, resolve as resolve4 } from "node:path";
 function claudeMd(file, seen = /* @__PURE__ */ new Set()) {
-  if (seen.has(file) || !existsSync3(file)) return 0;
+  if (seen.has(file) || !existsSync4(file)) return 0;
   seen.add(file);
   const text2 = read2(file);
   let n = estimateTokens(text2);
   for (const m of text2.matchAll(/^@(\S+)/gm)) {
-    const p = m[1].startsWith("~/") ? join6(homedir4(), m[1].slice(2)) : resolve3(dirname(file), m[1]);
+    const p = m[1].startsWith("~/") ? join7(homedir4(), m[1].slice(2)) : resolve4(dirname2(file), m[1]);
     n += claudeMd(p, seen);
   }
   return n;
@@ -7926,21 +7997,21 @@ function components(root, source) {
   };
   const skills = [];
   const walk = (d, depth) => {
-    if (existsSync3(join6(d, "SKILL.md"))) {
-      skills.push(join6(d, "SKILL.md"));
+    if (existsSync4(join7(d, "SKILL.md"))) {
+      skills.push(join7(d, "SKILL.md"));
       return;
     }
     if (depth < 4) {
-      for (const s of ls(d)) if (s !== "node_modules" && !s.startsWith(".")) walk(join6(d, s), depth + 1);
+      for (const s of ls(d)) if (s !== "node_modules" && !s.startsWith(".")) walk(join7(d, s), depth + 1);
     }
   };
-  for (const s of ls(join6(root, "skills"))) walk(join6(root, "skills", s), 1);
+  for (const s of ls(join7(root, "skills"))) walk(join7(root, "skills", s), 1);
   add("skills", skills);
-  add("agents", ls(join6(root, "agents")).filter((f) => f.endsWith(".md")).map((f) => join6(root, "agents", f)));
-  add("commands", ls(join6(root, "commands")).filter((f) => f.endsWith(".md")).map((f) => join6(root, "commands", f)));
-  const hooks = read2(join6(root, "hooks", "hooks.json"));
+  add("agents", ls(join7(root, "agents")).filter((f) => f.endsWith(".md")).map((f) => join7(root, "agents", f)));
+  add("commands", ls(join7(root, "commands")).filter((f) => f.endsWith(".md")).map((f) => join7(root, "commands", f)));
+  const hooks = read2(join7(root, "hooks", "hooks.json"));
   if (/"SessionStart"/.test(hooks)) out.push({ source, kind: "SessionStart hook", count: 1, tokens: 0, note: "injects text at startup (size known at run time)" });
-  const mcp = read2(join6(root, ".mcp.json"));
+  const mcp = read2(join7(root, ".mcp.json"));
   try {
     const n = Object.keys(JSON.parse(mcp).mcpServers ?? JSON.parse(mcp)).length;
     if (n) out.push({ source, kind: "MCP servers", count: n, tokens: 0, note: "tool schemas loaded (or deferred) at startup" });
@@ -7948,29 +8019,29 @@ function components(root, source) {
   }
   return out;
 }
-function audit(cwd = process.cwd(), home = process.env.CLAUDE_CONFIG_DIR ?? join6(homedir4(), ".claude")) {
+function audit(cwd = process.cwd(), home = process.env.CLAUDE_CONFIG_DIR ?? join7(homedir4(), ".claude")) {
   const items = [];
-  const user = claudeMd(join6(home, "CLAUDE.md"));
+  const user = claudeMd(join7(home, "CLAUDE.md"));
   if (user) items.push({ source: "~/.claude", kind: "CLAUDE.md", count: 1, tokens: user });
-  for (const f of [join6(cwd, "CLAUDE.md"), join6(cwd, ".claude", "CLAUDE.md"), join6(cwd, "CLAUDE.local.md")]) {
+  for (const f of [join7(cwd, "CLAUDE.md"), join7(cwd, ".claude", "CLAUDE.md"), join7(cwd, "CLAUDE.local.md")]) {
     const n = claudeMd(f);
     if (n) items.push({ source: "project", kind: f.slice(cwd.length + 1), count: 1, tokens: n });
   }
   items.push(...components(home, "~/.claude"));
   let enabled = {};
   try {
-    enabled = JSON.parse(read2(join6(home, "settings.json"))).enabledPlugins ?? {};
+    enabled = JSON.parse(read2(join7(home, "settings.json"))).enabledPlugins ?? {};
   } catch {
   }
   let installed = {};
   try {
-    installed = JSON.parse(read2(join6(home, "plugins", "installed_plugins.json"))).plugins ?? {};
+    installed = JSON.parse(read2(join7(home, "plugins", "installed_plugins.json"))).plugins ?? {};
   } catch {
   }
   for (const [id, on] of Object.entries(enabled)) {
     if (!on) continue;
     const entry = installed[id]?.find((x) => x.scope === "user") ?? installed[id]?.[0];
-    if (entry && existsSync3(entry.installPath)) items.push(...components(entry.installPath, id.split("@")[0]));
+    if (entry && existsSync4(entry.installPath)) items.push(...components(entry.installPath, id.split("@")[0]));
   }
   return items.sort((a, b) => b.tokens - a.tokens);
 }
@@ -7992,7 +8063,7 @@ var init_audit = __esm({
     init_tokens();
     read2 = (f) => {
       try {
-        return readFileSync4(f, "utf8");
+        return readFileSync5(f, "utf8");
       } catch {
         return "";
       }
@@ -20138,7 +20209,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+        await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -20155,7 +20226,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -20233,7 +20304,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve4(parseResult.data);
+            resolve5(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -20495,12 +20566,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve4, interval);
+      const timeoutId = setTimeout(resolve5, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -21631,7 +21702,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+      await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -22295,12 +22366,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve4();
+        resolve5();
       } else {
-        this._stdout.once("drain", resolve4);
+        this._stdout.once("drain", resolve5);
       }
     });
   }
@@ -23735,8 +23806,9 @@ function statistics(q = {}) {
     byDay: byDay(scope.days ?? 3650, scope.project).map($),
     stack: { by: scope.project ? "tool" : "project", rows: byDayAndKey(scope.project ? "tool" : "project", scope) },
     byTool: byKey("tool", scope).map($),
-    byProject: byKey("project", scope).map($),
-    projects: projects().map($),
+    // Benchmark / temp folders (config excludeProjects) stay out of the project lists.
+    byProject: byKey("project", scope).filter((p) => !isBench(p.key, cfg)).map($),
+    projects: projects().filter((p) => !isBench(p.key, cfg)).map($),
     recent: recent(30, scope),
     redirections: { day: redirectStats("day"), week: redirectStats("week"), total: redirectStats("total") }
   };
@@ -23791,7 +23863,7 @@ init_config();
 import { execFile } from "node:child_process";
 import { extname as extname2 } from "node:path";
 import { fileURLToPath } from "node:url";
-var server = new McpServer({ name: "token-eco", version: "0.6.1" });
+var server = new McpServer({ name: "token-eco", version: "0.6.2" });
 var ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 function adapter(name, tool) {
   return async (args) => {
