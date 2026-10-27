@@ -93,8 +93,7 @@ td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
         <path d="M9 23l8-8" stroke="var(--acc)" stroke-width="2.2" stroke-linecap="round"/></svg>
       <div>token-eco<small>local savings board</small></div>
     </div>
-    <div><p class="label">Projects</p><nav class="nav" id="projects"></nav>
-      <label class="chk" style="margin-top:8px"><input type="checkbox" id="benchSide"> <span id="benchSideTxt">show benchmarks / temp</span></label></div>
+    <div><p class="label">Projects</p><nav class="nav" id="projects"></nav></div>
     <div class="foot">
       <div class="seg" id="themes"><button data-t="auto">Auto</button><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
       <div class="live"><span class="dot"></span><span id="updated">connecting…</span></div>
@@ -287,8 +286,6 @@ function render() {
       : w.startsWith(parent + "/") ? w.slice(parent.length + 1) : w;
     bars($("wdRows"), d.byWorkdir, rel);
   }
-  $("benchSide").checked = state.bench;
-  $("benchSideTxt").textContent = state.bench ? "show benchmarks / temp" : `show benchmarks / temp${d.hiddenProjects ? ` (${d.hiddenProjects} hidden)` : ""}`;
   const m = p.models.find((x) => x.key === p.model);
   $("priceChecked").textContent = `$/MTok · checked ${p.checked}`;
   $("prices").innerHTML = [["Input", m.input], ["Cache write (5 min)", m.cacheWrite5m], ["Cache read", m.cacheRead], ["Output", m.output]]
@@ -379,12 +376,12 @@ async function loadSessions(qs) {
   try { renderSessions(await (await fetch(`/api/sessions?${qs}`)).json()); } catch { /* the estimates still show */ }
 }
 $("realModel").onchange = (e) => { state.realModel = e.target.value; store("realModel", state.realModel); load(); };
-$("bench").onchange = $("benchSide").onchange = (e) => { state.bench = e.target.checked; store("bench", state.bench ? "1" : ""); load(); };
+$("bench").onchange = (e) => { state.bench = e.target.checked; store("bench", state.bench ? "1" : ""); load(); };
 $("projects").onclick = (e) => { const b = e.target.closest("button"); if (b) pick(b.dataset.p); };
 
 async function load() {
   try {
-    const qs = new URLSearchParams({ days: String(state.days), ...(state.project ? { project: state.project } : {}), ...(state.model ? { model: state.model } : {}), ...(state.bench ? { bench: "1" } : {}) });
+    const qs = new URLSearchParams({ days: String(state.days), ...(state.project ? { project: state.project } : {}), ...(state.model ? { model: state.model } : {}) });
     loadSessions(new URLSearchParams({ days: String(state.days || 365), ...(state.project ? { project: state.project } : {}),
       ...(state.realModel ? { model: state.realModel } : {}), ...(state.bench ? { bench: "1" } : {}) }));
     data = await (await fetch(`/api/stats?${qs}`)).json();

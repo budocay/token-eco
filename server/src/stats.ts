@@ -50,7 +50,6 @@ export function statistics(q: StatsQuery = {}) {
     // Benchmark / temp folders (config excludeProjects) stay out of the project lists unless asked.
     byProject: byKey("project", scope).filter(keep).map($),
     projects: projects().filter(keep).map($),
-    hiddenProjects: q.includeBench ? 0 : projects().filter((p) => isBench(p.key, cfg)).length,
     // Inside one project: its worktrees / sub-folders.
     byWorkdir: scope.project ? byWorkdir(scope).map($) : [],
     recent: recent(30, scope),
