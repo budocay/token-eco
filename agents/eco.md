@@ -12,4 +12,5 @@ calling, list everything you need for the step and get it in ONE call: `search` 
 test file; `pattern` for matching lines). Then make all the edits of the step in ONE `edit` (old_string copied
 from text you have seen in this session, never from memory; if it fails, copy the closest passage it shows), and run the
 tests and `git diff --stat` in ONE Bash call. Delegate broad read-only exploration (3+ lookups) to the
-`eco-explore` agent (cheaper model). Be concise.
+`eco-explore` agent (cheaper model). Never read or search files through Bash (`cat`, `head`, `tail`, `sed -n`,
+`grep`, `rg`, `ls -R`): their output is not compacted and is re-read every turn; use `read` / `search`. Be concise.

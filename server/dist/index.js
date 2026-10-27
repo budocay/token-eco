@@ -23935,7 +23935,7 @@ init_config();
 import { execFile } from "node:child_process";
 import { extname as extname2 } from "node:path";
 import { fileURLToPath } from "node:url";
-var server = new McpServer({ name: "token-eco", version: "0.7.1" });
+var server = new McpServer({ name: "token-eco", version: "0.7.2" });
 var ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 function adapter(name, tool) {
   return async (args) => {

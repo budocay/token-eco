@@ -1015,7 +1015,7 @@ var GUIDANCE = [
   "- one `read` with all `targets` (`name` = one symbol, `start`/`end`, `pattern` = matching lines; no option = whole file if short, else outline);",
   "- one `edit` with every change of a step, using only text you have seen in this session (read a doc file before editing it);",
   "- one Bash call chaining related commands (e.g. tests, then `git diff --stat`).",
-  "Prefer these tools to Read/Grep/Glob/Edit and to cat/grep/sed in Bash. Never re-read what you just read or wrote."
+  "Prefer these tools to Read/Grep/Glob/Edit, and never read or search files with cat/head/tail/sed -n/grep/rg in Bash (not compacted, re-read every turn). Never re-read what you just read or wrote."
 ].join("\n");
 function guidanceOutput(event = "SessionStart") {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: GUIDANCE } });
