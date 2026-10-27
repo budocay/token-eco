@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test test/",
     "bench": "node bench/bench.ts",
-    "bench:ab": "node bench/ab.ts"
+    "bench:ab": "node bench/ab.ts",
+    "bench:adoption": "node bench/adoption.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.0",
