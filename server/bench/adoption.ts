@@ -223,10 +223,14 @@ if (DRY) {
 const HOME_NATIVE = mkdtempSync(join(tmpdir(), "te-ad-native-"));
 writeFileSync(join(HOME_NATIVE, "config.json"), JSON.stringify({ hook: { mode: "off" } }));
 // --report-only: rebuild ADOPTION.md from adoption-raw.json (e.g. after a run stopped early).
-const REPORT_ONLY = process.argv.includes("--report-only");
-const trials: Trial[] = REPORT_ONLY ? JSON.parse(readFileSync(join(HERE, `${OUT}-raw.json`), "utf8")) : [];
+// --resume: keep the valid runs of <out>-raw.json and only run the missing ones (e.g. after a network loss).
+const REPORT_ONLY = process.argv.includes("--report-only"), RESUME = process.argv.includes("--resume");
+const trials: Trial[] = REPORT_ONLY || RESUME ? JSON.parse(readFileSync(join(HERE, `${OUT}-raw.json`), "utf8")) : [];
+if (RESUME) trials.splice(0, trials.length, ...trials.filter((x) => !x.error));
 let spent = trials.reduce((a, x) => a + x.cost, 0), infra = 0;
+const done = (m: string, task: string, v: string) => trials.filter((x) => x.model === m && x.task === task && x.variant === v && !x.error).length;
 outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for (let n = 0; n < TRIALS; n++) for (const v of VARIANTS) {
+  if (RESUME && done(model, t.id, v.id) > n) continue;
   const folder = mkdtempSync(join(tmpdir(), "te-ad-"));
   fixture(folder, v); t.prepare(folder);
   const home = v.plugin ? mkdtempSync(join(tmpdir(), "te-ad-eco-")) : HOME_NATIVE;
@@ -242,7 +246,8 @@ outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for
   try {
     const end = JSON.parse(r.stdout);
     row.cost = end.total_cost_usd ?? 0;
-    if (end.is_error || end.subtype !== "success") row.error = `${end.subtype}: ${String(end.result ?? "").slice(0, 200)}`;
+    // A lost connection can come back as subtype "success" with "API Error: …" as the answer: infra, not task failure.
+    if (end.is_error || end.subtype !== "success" || /^API Error/.test(String(end.result ?? ""))) row.error = `${end.subtype}: ${String(end.result ?? "").slice(0, 200)}`;
     else Object.assign(row, t.verify(String(end.result ?? ""), folder));
     const log = end.session_id ? findLog(end.session_id, folder) : null;
     if (log) {
