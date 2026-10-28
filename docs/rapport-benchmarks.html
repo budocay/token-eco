@@ -4,58 +4,164 @@
 <meta charset="utf-8">
 <title>token-eco — Rapport des benchmarks</title>
 <style>
-  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
-  body { font: 10.5pt/1.45 -apple-system, "Helvetica Neue", Arial, sans-serif; color: #1d2330; }
-  h1 { font-size: 22pt; margin: 0 0 4px; } h2 { font-size: 14pt; margin: 22px 0 6px; border-bottom: 2px solid #2b6cb0; padding-bottom: 3px; page-break-after: avoid; }
-  h3 { font-size: 11.5pt; margin: 14px 0 4px; page-break-after: avoid; } p { margin: 5px 0; } ul, ol { margin: 4px 0 4px 18px; padding: 0; }
-  table { border-collapse: collapse; width: 100%; margin: 6px 0 8px; font-size: 8.8pt; page-break-inside: avoid; }
-  th, td { border: 1px solid #cfd6e0; padding: 3px 5px; text-align: left; vertical-align: top; } th { background: #eef2f7; }
-  td.n, th.n { text-align: right; white-space: nowrap; } .meta { color: #5a6475; font-size: 9.5pt; }
-  .box { border: 1px solid #cfd6e0; border-left: 4px solid #2b6cb0; background: #f6f8fb; padding: 7px 10px; margin: 8px 0; page-break-inside: avoid; }
-  .warn { border-left-color: #c05621; background: #fdf6f0; } .ok { border-left-color: #2f855a; background: #f2f9f5; }
-  .lvl { display: inline-block; font-size: 8pt; font-weight: 600; padding: 0 5px; border-radius: 3px; color: #fff; }
-  .l1 { background: #2f855a; } .l2 { background: #2b6cb0; } .l3 { background: #b7791f; } .l4 { background: #9b2c2c; }
-  .bar { display: inline-block; height: 9px; background: #2b6cb0; vertical-align: middle; } .bar.n { background: #a0aec0; }
-  code { font: 8.8pt ui-monospace, Menlo, monospace; background: #eef2f7; padding: 0 3px; border-radius: 2px; }
-  .small { font-size: 8.8pt; color: #4a5568; } .pb { page-break-before: always; }
-  .toc li { margin: 1px 0; }
+:root {
+  --ink: #0f172a; --text: #1e293b; --muted: #64748b; --line: #e2e8f0; --soft: #f8fafc;
+  --brand: #4f46e5; --brand2: #0891b2; --good: #059669; --bad: #dc2626; --warn: #d97706;
+  --good-bg: #ecfdf5; --bad-bg: #fef2f2; --warn-bg: #fffbeb; --brand-bg: #eef2ff;
+}
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+html { scroll-behavior: smooth; }
+body { margin: 0; font: 10.5pt/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, Roboto, sans-serif;
+  color: var(--text); background: #eef1f6; }
+code { font: 0.86em ui-monospace, "SF Mono", Menlo, monospace; background: var(--brand-bg); color: #3730a3; padding: 1px 5px; border-radius: 4px; }
+b { color: var(--ink); }
+
+/* ---------- layout (screen) ---------- */
+.layout { display: grid; grid-template-columns: 250px minmax(0, 900px); gap: 28px; justify-content: center; padding: 28px 20px 60px; }
+nav.toc { position: sticky; top: 24px; align-self: start; background: #fff; border-radius: 14px; padding: 16px 14px;
+  box-shadow: 0 1px 2px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.06); font-size: 9.5pt; }
+nav.toc .t { font-size: 8pt; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin: 0 0 8px 6px; }
+nav.toc a { display: flex; gap: 8px; align-items: baseline; padding: 5px 8px; border-radius: 8px; color: var(--text); text-decoration: none; }
+nav.toc a:hover { background: var(--brand-bg); color: var(--brand); }
+nav.toc a span { font: 600 8.5pt ui-monospace, Menlo, monospace; color: var(--brand); min-width: 18px; }
+main.doc { background: #fff; border-radius: 18px; overflow: hidden; box-shadow: 0 1px 2px rgba(15,23,42,.06), 0 12px 40px rgba(15,23,42,.08); }
+.content { padding: 8px 44px 40px; }
+
+/* ---------- cover ---------- */
+.cover { position: relative; color: #fff; padding: 44px 44px 36px;
+  background: radial-gradient(1200px 400px at 90% -10%, rgba(34,211,238,.35), transparent 60%),
+              linear-gradient(135deg, #1e1b4b 0%, #3730a3 55%, #0e7490 100%); }
+.cover .kicker { font: 600 8.5pt ui-monospace, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; opacity: .8; }
+.cover h1 { font-size: 30pt; line-height: 1.1; margin: 10px 0 8px; letter-spacing: -.02em; color: #fff; }
+.cover .sub { font-size: 12pt; opacity: .88; max-width: 620px; margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0 26px; }
+.chip { font-size: 8.5pt; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22); }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.kpi { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); border-radius: 12px; padding: 12px 14px; }
+.kpi .v { font-size: 21pt; font-weight: 750; letter-spacing: -.02em; line-height: 1.1; }
+.kpi .l { font-size: 8.5pt; opacity: .85; margin-top: 3px; }
+
+/* ---------- headings ---------- */
+h2 { font-size: 15pt; color: var(--ink); letter-spacing: -.01em; margin: 34px 0 10px; padding-top: 6px; display: flex; align-items: center; gap: 10px; page-break-after: avoid; }
+h2::before { content: ""; width: 5px; height: 22px; border-radius: 3px; background: linear-gradient(var(--brand), var(--brand2)); flex: none; }
+h2 .num { font: 700 9pt ui-monospace, Menlo, monospace; color: var(--brand); background: var(--brand-bg); padding: 2px 7px; border-radius: 6px; }
+h3 { font-size: 11.5pt; color: var(--ink); margin: 20px 0 6px; page-break-after: avoid; }
+p { margin: 6px 0; } ul, ol { margin: 6px 0 6px 20px; padding: 0; } li { margin: 3px 0; }
+.meta, .small { font-size: 8.8pt; color: var(--muted); }
+
+/* ---------- cards & callouts ---------- */
+.box { border-radius: 12px; padding: 12px 16px; margin: 12px 0; background: var(--brand-bg); border: 1px solid #c7d2fe; page-break-inside: avoid; }
+.box.ok { background: var(--good-bg); border-color: #a7f3d0; } .box.warn { background: var(--warn-bg); border-color: #fde68a; }
+.abstract { font-size: 10.5pt; background: var(--soft); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; margin: 26px 0 8px; }
+.abstract::before { content: "Résumé"; display: block; font: 700 8pt ui-monospace, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--brand); margin-bottom: 6px; }
+.facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0; }
+.fact { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #fff; }
+.fact .v { font-size: 16pt; font-weight: 750; color: var(--ink); } .fact .l { font-size: 8.5pt; color: var(--muted); }
+
+/* ---------- tables ---------- */
+table { border-collapse: separate; border-spacing: 0; width: 100%; margin: 10px 0 12px; font-size: 8.8pt; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; page-break-inside: avoid; }
+th, td { padding: 6px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+th { background: var(--soft); color: var(--muted); font-size: 7.8pt; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+tr:last-child td { border-bottom: 0; } tbody tr:nth-child(even) td, tr:nth-child(even) td { background: #fbfcfe; }
+td.n, th.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-weight: 650; font-size: 8.4pt; }
+.pill.good { background: var(--good-bg); color: var(--good); } .pill.bad { background: var(--bad-bg); color: var(--bad); } .pill.flat { background: var(--soft); color: var(--muted); }
+
+/* ---------- evidence levels ---------- */
+.lvl { display: inline-block; font-size: 7.6pt; font-weight: 700; padding: 2px 8px; border-radius: 999px; letter-spacing: .02em; white-space: nowrap; }
+.l1 { background: var(--good-bg); color: var(--good); border: 1px solid #a7f3d0; }
+.l2 { background: var(--brand-bg); color: var(--brand); border: 1px solid #c7d2fe; }
+.l3 { background: var(--warn-bg); color: var(--warn); border: 1px solid #fde68a; }
+.l4 { background: var(--bad-bg); color: var(--bad); border: 1px solid #fecaca; }
+
+/* ---------- charts ---------- */
+.chart { border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px 10px; margin: 12px 0; background: #fff; page-break-inside: avoid; }
+.chart .title { font-weight: 700; color: var(--ink); font-size: 10pt; } .chart .hint { font-size: 8.5pt; color: var(--muted); margin-bottom: 8px; }
+.group { margin: 10px 0 4px; font: 700 8pt ui-monospace, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.row { display: grid; grid-template-columns: 92px 1fr 150px; gap: 10px; align-items: center; margin: 5px 0; font-size: 8.8pt; }
+.track { position: relative; height: 16px; background: var(--soft); border-radius: 6px; }
+.fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: linear-gradient(90deg, #6366f1, #22d3ee); }
+.fill.native { background: linear-gradient(90deg, #94a3b8, #cbd5e1); } .fill.cov { background: linear-gradient(90deg, #10b981, #6ee7b7); }
+.range { position: absolute; top: 7px; height: 2px; background: var(--ink); opacity: .55; }
+.range::before, .range::after { content: ""; position: absolute; top: -4px; width: 2px; height: 10px; background: var(--ink); }
+.range::before { left: 0; } .range::after { right: 0; }
+.val { font-variant-numeric: tabular-nums; color: var(--text); } .val small { color: var(--muted); }
+.legend { font-size: 8pt; color: var(--muted); margin-top: 6px; }
+
+/* ---------- print ---------- */
+@page { size: A4; margin: 14mm 13mm 16mm; }
+@media print {
+  body { background: #fff; font-size: 9.8pt; }
+  .layout { display: block; padding: 0; }
+  nav.toc { display: none; }
+  main.doc { box-shadow: none; border-radius: 0; }
+  .cover { border-radius: 14px; } .content { padding: 0 2px; }
+  .pb { page-break-before: always; }
+  a { color: inherit; text-decoration: none; }
+}
+@media (max-width: 980px) { .layout { grid-template-columns: 1fr; } nav.toc { position: static; } .kpis { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
 <body>
 
-<h1>token-eco — Rapport des benchmarks</h1>
-<p class="meta">Plugin Claude Code personnel · versions testées v0.3 à v0.7.4 · campagnes du 22 au 28 octobre 2026 ·
-document généré à partir des rapports et données brutes du dépôt (<code>server/bench/</code>).</p>
-
-<div class="box">
-<b>Résumé.</b> token-eco fournit à Claude Code des outils de lecture, recherche et édition de fichiers conçus pour renvoyer moins de
-tokens, un agent principal qui les impose, une consigne injectée aux sous-agents et un hook qui compacte les sorties Bash et
-redirige les lectures de gros fichiers. Six séries de mesures ont été menées. <b>(1)</b> Hors ligne, les outils renvoient
-4 à 24 % de la taille d'une lecture complète avec une fidélité structurelle de 92 à 100 % (TS, JS, Python), et la recherche
-compacte donne les mêmes résultats que <code>grep</code> pour 47 % de ses tokens. <b>(2)</b> En A/B mono-agent sur des tâches
-courtes (Sonnet), le coût baisse de 8 à 10 % sans perte de réussite (56/56). <b>(3)</b> Sur des sessions réelles scénarisées,
-aucune économie en dollars n'est démontrée avec Sonnet (−7 % à +22 % selon les runs) ; un run Opus donne −13 %.
-<b>(4)</b> En usage réel (30 jours de logs), les outils n'étaient presque pas utilisés (4,7 % du fil principal, 1,2 % des
-sous-agents) : un autre plugin imposait son agent et des agents de projet n'avaient pas accès aux outils. <b>(5)</b> Dans un
-banc multi-agents reproduisant cette situation (63 exécutions, toutes réussies), donner les outils au relecteur fait passer
-sa couverture de 0 % à 39–93 % ; sur des tâches courtes le coût ne change pas de façon mesurable, tandis que sur une tâche
-longue (5 délégations) les variantes token-eco coûtent <b>19 à 48 % de moins</b> que la référence, avec une séparation
-complète des valeurs dans deux cas sur quatre (p = 0,10, plus petite valeur atteignable avec 3 essais). Une partie de ce gain
-vient de l'agent principal (moins de tours d'orchestration), pas seulement des outils. Aucun résultat n'atteint le seuil
-conventionnel de 5 % : ce sont des tendances cohérentes, pas des preuves.
+<div class="layout">
+<nav class="toc">
+  <p class="t">Sommaire</p>
+  <a href="#s1"><span>01</span>Contexte et questions</a>
+  <a href="#s2"><span>02</span>Système étudié</a>
+  <a href="#s3"><span>03</span>Méthode et définitions</a>
+  <a href="#s4"><span>04</span>Banc 1 · Qualité hors ligne</a>
+  <a href="#s5"><span>05</span>Banc 2 · Multi-langages</a>
+  <a href="#s6"><span>06</span>Banc 3 · A/B mono-agent</a>
+  <a href="#s7"><span>07</span>Banc 4 · Sessions scénarisées</a>
+  <a href="#s8"><span>08</span>Usage réel · 30 jours</a>
+  <a href="#s9"><span>09</span>Banc 6 · Adoption multi-agents</a>
+  <a href="#s10"><span>10</span>Synthèse et niveaux de preuve</a>
+  <a href="#s11"><span>11</span>Menaces à la validité</a>
+  <a href="#s12"><span>12</span>Recommandations</a>
+  <a href="#s13"><span>13</span>Annexes</a>
+</nav>
+<main class="doc">
+<header class="cover">
+  <div class="kicker">Rapport technique · token-eco</div>
+  <h1>Ce que token-eco économise vraiment</h1>
+  <p class="sub">Six séries de mesures sur un plugin Claude Code qui réduit les tokens lus et écrits : qualité des outils, coût en
+    conditions contrôlées, adoption en usage réel et sessions multi-agents.</p>
+  <div class="chips">
+    <span class="chip">Versions v0.3 → v0.7.4</span><span class="chip">22 – 28 octobre 2026</span>
+    <span class="chip">Sonnet 5.5 · Opus 5.5</span><span class="chip">Claude Code 2.1.29x – 2.1.31x</span>
+    <span class="chip">Données : server/bench/</span>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="v">−48 %</div><div class="l">coût d'une tâche longue multi-agents (Sonnet, meilleure variante)</div></div>
+    <div class="kpi"><div class="v">0 → 93 %</div><div class="l">part des lectures d'un relecteur passant par token-eco une fois équipé</div></div>
+    <div class="kpi"><div class="v">4–24 %</div><div class="l">taille d'une lecture ciblée vs fichier entier, fidélité 92–100 %</div></div>
+    <div class="kpi"><div class="v">63 / 63</div><div class="l">exécutions réussies au banc d'adoption, aucune perte de qualité</div></div>
+  </div>
+</header>
+<div class="content">
+<div class="abstract">
+token-eco fournit à Claude Code des outils de lecture, recherche et édition de fichiers conçus pour renvoyer moins de tokens, un agent
+principal qui les impose, une consigne injectée aux sous-agents et un hook qui compacte les sorties Bash et redirige les lectures de
+gros fichiers. <b>(1)</b> Hors ligne, les outils renvoient 4 à 24 % de la taille d'une lecture complète avec une fidélité structurelle de
+92 à 100 % (TS, JS, Python) ; la recherche compacte donne les mêmes résultats que <code>grep</code> pour 47 % de ses tokens.
+<b>(2)</b> En A/B mono-agent sur des tâches courtes (Sonnet), le coût baisse de 8 à 10 % sans perte de réussite (56/56).
+<b>(3)</b> Sur des sessions réelles scénarisées, aucune économie en dollars n'est démontrée avec Sonnet (−7 % à +22 % selon les runs) ;
+un run Opus donne −13 %. <b>(4)</b> En usage réel (30 jours), les outils n'étaient presque pas utilisés (4,7 % du fil principal, 1,2 %
+des sous-agents) : un autre plugin imposait son agent et des agents de projet n'y avaient pas accès. <b>(5)</b> Dans un banc
+multi-agents reproduisant cette situation (63 exécutions, toutes réussies), équiper le relecteur fait passer sa couverture de 0 % à
+39–93 % ; sur des tâches courtes le coût ne change pas de façon mesurable, tandis que sur une tâche longue les variantes token-eco
+coûtent <b>19 à 48 % de moins</b>, avec séparation complète des valeurs dans deux cas sur quatre (p = 0,10, minimum atteignable avec
+3 essais). Une partie de ce gain vient de l'agent principal (moins de tours d'orchestration). Aucun résultat n'atteint le seuil de
+5 % : ce sont des tendances cohérentes, pas des preuves.
+</div>
+<div class="facts">
+  <div class="fact"><div class="v">6</div><div class="l">séries de mesures, de la qualité hors ligne à l'usage réel</div></div>
+  <div class="fact"><div class="v">≈ 62 $</div><div class="l">consommés par le banc d'adoption (prix équivalent API)</div></div>
+  <div class="fact"><div class="v">10</div><div class="l">conclusions, chacune avec son niveau de preuve</div></div>
 </div>
 
-<h2>Sommaire</h2>
-<ol class="toc">
-  <li>Contexte et questions</li><li>Système étudié</li><li>Méthode commune et définitions</li>
-  <li>Banc 1 — Qualité hors ligne (TS, JS, Python)</li><li>Banc 2 — Qualité multi-langages</li>
-  <li>Banc 3 — A/B mono-agent en conditions réelles</li><li>Banc 4 — Sessions réelles scénarisées</li>
-  <li>Observation 5 — Usage réel sur 30 jours</li><li>Banc 6 — Adoption multi-agents (campagnes A1, A2, A3)</li>
-  <li>Synthèse des conclusions et niveaux de preuve</li><li>Menaces à la validité</li><li>Recommandations</li>
-  <li>Annexes : reproduction, coûts, glossaire</li>
-</ol>
-
-<h2>1. Contexte et questions</h2>
+<h2 id="s1"><span class="num">01</span>Contexte et questions</h2>
 <p>Dans Claude Code, chaque appel d'outil est un tour complet : le modèle relit tout le contexte (depuis le cache de prompt),
 puis le résultat de l'outil est ajouté au contexte et relu à chaque tour suivant. Le coût d'une session dépend donc de la
 taille des résultats, du nombre de tours et de la taille du contexte accumulé. token-eco cherche à réduire les deux premiers.
@@ -68,7 +174,7 @@ Les mesures visent à répondre aux questions suivantes :</p>
     selon la longueur de la tâche ?</li>
 </ul>
 
-<h2>2. Système étudié</h2>
+<h2 id="s2"><span class="num">02</span>Système étudié</h2>
 <table>
 <tr><th>Composant</th><th>Rôle</th><th>Présent dans les variantes « eco »</th></tr>
 <tr><td>Serveur MCP : <code>read</code>, <code>search</code>, <code>edit</code></td><td>lecture d'un symbole, d'une plage ou d'un plan ;
@@ -82,7 +188,7 @@ Les mesures visent à répondre aux questions suivantes :</p>
 <p class="small">Une variante « eco » change donc plusieurs choses à la fois par rapport à la référence. Les bancs 3 et 6 mesurent
 l'effet de l'ensemble ; seul le contraste eco-before / eco-after du banc 6 isole un facteur (l'accès du relecteur aux outils).</p>
 
-<h2>3. Méthode commune et définitions</h2>
+<h2 id="s3"><span class="num">03</span>Méthode commune et définitions</h2>
 <ul>
   <li><b>Coût :</b> <code>total_cost_usd</code> renvoyé par Claude Code en fin de session (sous-agents compris), c'est-à-dire le prix
     équivalent API. Les exécutions passent par un abonnement : ce montant mesure la consommation, il n'est pas facturé tel quel.</li>
@@ -105,7 +211,7 @@ l'effet de l'ensemble ; seul le contraste eco-before / eco-after du banc 6 isole
 <span class="lvl l3">Indicatif</span> tendance, variance élevée ou un seul run ·
 <span class="lvl l4">Non démontré</span>.</p>
 
-<h2 class="pb">4. Banc 1 — Qualité hors ligne (TS, JS, Python)</h2>
+<h2 id="s4" class="pb"><span class="num">04</span>Banc 1 — Qualité hors ligne (TS, JS, Python)</h2>
 <p><b>Objectif :</b> Q1. Vérifier que le plan d'un fichier et la lecture d'un symbole sont fidèles, et mesurer leur taille par rapport à
 la lecture complète. <b>Périmètre :</b> 263 fichiers (zod et ajv en TypeScript, SDK MCP compilé en JavaScript, bibliothèque standard
 Python 3.15), 2 666 symboles. <b>Méthode :</b> comparaison à une vérité terrain issue de l'arbre syntaxique réel (compilateur
@@ -123,7 +229,7 @@ par défaut, qui ne renvoie que la liste des fichiers (104 tokens au total).</p>
 <p><b>Conclusion :</b> <span class="lvl l1">Établi</span> les outils sont fidèles et renvoient 4 à 22 % de la taille d'une lecture complète.
 <b>Limites :</b> mesure de taille par appel, pas d'une session ; l'économie réelle dépend de ce que l'agent aurait lu à la place.</p>
 
-<h2>5. Banc 2 — Qualité multi-langages</h2>
+<h2 id="s5"><span class="num">05</span>Banc 2 — Qualité multi-langages</h2>
 <p><b>Objectif :</b> Q1 hors des trois langages principaux. <b>Périmètre :</b> 15 langages, jusqu'à 50 fichiers chacun, dépôts open source.
 <b>Méthode :</b> vérité terrain universal-ctags (<code>node bench/languages.ts</code>).</p>
 <p><b>Résultats globaux :</b> rappel du plan 96,9 %, lecture de symbole exacte 92,8 %. Taille du plan : 4,6 % (shell) à 23,5 % (PHP) de la
@@ -132,7 +238,7 @@ et C# (≈ 68 %), lecture de symbole en Elixir (40,3 % exacte). Swift, Scala et 
 <p><b>Conclusion :</b> <span class="lvl l1">Établi</span> fidélité élevée pour la plupart des langages, avec des faiblesses identifiées (C, Java,
 C#, Elixir).</p>
 
-<h2>6. Banc 3 — A/B mono-agent en conditions réelles</h2>
+<h2 id="s6"><span class="num">06</span>Banc 3 — A/B mono-agent en conditions réelles</h2>
 <p><b>Objectif :</b> Q2. <b>Périmètre :</b> 5 tâches courtes (comprendre, chercher, éditer, mini-session, fonctionnalité avec tests) sur
 zod/src/v3 et sur le serveur du plugin ; Claude Code en mode non interactif (<code>claude -p</code>), Sonnet, 4 essais par tâche et par mode.
 <b>Méthode :</b> chaque essai sur une copie jetable ; échauffement non compté pour neutraliser le cache froid ; réussite vérifiée.</p>
@@ -153,7 +259,7 @@ cache, qui pèse lourd sur des tâches de cette taille. Sur t4 et t4/t5 v0.4.1, 
 16/16 en v0.4.1), principalement par moins de tours. <b>Limites :</b> tâches courtes et conçues pour l'outil ; pas de test statistique ; à
 l'époque, la référence n'était pas protégée contre l'agent du plugin installé (défaut découvert plus tard, voir §11).</p>
 
-<h2>7. Banc 4 — Sessions réelles scénarisées</h2>
+<h2 id="s7"><span class="num">07</span>Banc 4 — Sessions réelles scénarisées</h2>
 <p><b>Objectif :</b> Q2 sur une session complète. <b>Périmètre :</b> une session en 6 étapes sur la bibliothèque click 8.5.0 (explorer,
 corriger un bug, ajouter un type, renommer dans plusieurs fichiers, relecture par un sous-agent, changelog), mêmes prompts, cache chaud,
 9 contrôles d'acceptation cachés. <b>Méthode :</b> coût réel lu dans les journaux (<code>bench/session-cost.ts</code>), comparé à Claude Code
@@ -172,7 +278,7 @@ session à l'autre (±15 % et plus) dépasse l'effet. <span class="lvl l3">Indic
 Explication observée : Sonnet seul lit déjà avec parcimonie (<code>grep</code>, <code>sed -n</code> enchaînés), alors qu'Opus seul lit des
 fichiers entiers.</p>
 
-<h2>8. Observation 5 — Usage réel sur 30 jours</h2>
+<h2 id="s8"><span class="num">08</span>Observation 5 — Usage réel sur 30 jours</h2>
 <p><b>Nature :</b> étude observationnelle, pas une expérience. <b>Objectif :</b> Q3. <b>Périmètre :</b> journaux Claude Code de l'auteur sur
 30 jours, plusieurs projets, hors dossiers de benchmark et temporaires. <b>Méthode :</b> lecture des journaux par le tableau de bord du plugin.</p>
 <table>
@@ -192,7 +298,7 @@ d'un projet, un relecteur a utilisé token-eco pour 55 % de ses appels de fichie
 pouvait en résulter, quelle que soit leur qualité. <span class="lvl l3">Indicatif</span> l'adoption remonte une fois les causes levées
 (un projet, quelques heures).</p>
 
-<h2 class="pb">9. Banc 6 — Adoption multi-agents</h2>
+<h2 id="s9" class="pb"><span class="num">09</span>Banc 6 — Adoption multi-agents</h2>
 <p><b>Objectif :</b> Q3 et Q4 en conditions contrôlées : reproduire la situation observée en usage réel, mesurer l'adoption des outils
 par des sous-agents et son effet sur le coût, selon la longueur de la tâche. <b>Outil :</b> <code>server/bench/adoption.ts</code>,
 statistiques <code>server/bench/adoption-stats.ts</code>.</p>
@@ -260,7 +366,39 @@ exécutions :</p>
 <p>Le surcoût de +22 % disparaît (−11 % et +4 %, non significatifs). La moyenne de la référence varie elle-même de 13 % entre A1 et A2
 (0,194 $ contre 0,219 $) : c'est l'ordre de grandeur du bruit entre campagnes.</p>
 
+<div class="chart">
+  <div class="title">Effet du correctif du hook sur la relecture courte t6 (Sonnet)</div>
+  <div class="hint">Écart de coût moyen par rapport à native · 3 exécutions par variante · rouge = plus cher, vert = moins cher</div>
+  <div class="group">A1 · v0.7.3 (seuil en lignes)</div>
+  <div class="row"><span>eco-before</span><div class="track"><div class="fill" style="width:44%;background:linear-gradient(90deg,#f87171,#fca5a5)"></div></div><span class="val">+22 % <small>p = 0,20</small></span></div>
+  <div class="row"><span>eco-after</span><div class="track"><div class="fill" style="width:44%;background:linear-gradient(90deg,#f87171,#fca5a5)"></div></div><span class="val">+22 % <small>p = 0,20</small></span></div>
+  <div class="group">A2 · v0.7.4 (seuil en lignes et en tokens)</div>
+  <div class="row"><span>eco-before</span><div class="track"><div class="fill" style="width:22%;background:linear-gradient(90deg,#10b981,#6ee7b7)"></div></div><span class="val">−11 % <small>p = 0,40</small></span></div>
+  <div class="row"><span>eco-after</span><div class="track"><div class="fill" style="width:8%;background:linear-gradient(90deg,#f87171,#fca5a5)"></div></div><span class="val">+4 % <small>p = 0,70</small></span></div>
+  <div class="legend">Longueur de barre : |écart| × 2. Le bruit entre campagnes atteint 13 % (moyenne native A1 0,194 $, A2 0,219 $).</div>
+</div>
 <h3>9.5 Campagne A3 — tâche longue t8, v0.7.4 (18 exécutions)</h3>
+<div class="chart">
+  <div class="title">Coût d'une session, tâche longue t8</div>
+  <div class="hint">Barre = moyenne de 3 exécutions · trait = minimum–maximum · échelle 0 – 5,50 $</div>
+  <div class="group">Orchestrateur Sonnet</div>
+  <div class="row"><span>native</span><div class="track"><div class="fill native" style="width:45.1%"></div><div class="range" style="left:37.6%;width:12.0%"></div></div><span class="val">2,48 $ <small>[2,07–2,73]</small></span></div>
+  <div class="row"><span>eco-before</span><div class="track"><div class="fill" style="width:36.7%"></div><div class="range" style="left:23.3%;width:22.5%"></div></div><span class="val">2,02 $ <small>−19 %</small></span></div>
+  <div class="row"><span>eco-after</span><div class="track"><div class="fill" style="width:23.6%"></div><div class="range" style="left:18.2%;width:14.9%"></div></div><span class="val"><b>1,30 $</b> <small>−48 % · p = 0,10</small></span></div>
+  <div class="group">Orchestrateur Opus (sous-agents Sonnet)</div>
+  <div class="row"><span>native</span><div class="track"><div class="fill native" style="width:76.5%"></div><div class="range" style="left:65.3%;width:30.2%"></div></div><span class="val">4,21 $ <small>[3,59–5,25]</small></span></div>
+  <div class="row"><span>eco-before</span><div class="track"><div class="fill" style="width:52.5%"></div><div class="range" style="left:49.8%;width:7.6%"></div></div><span class="val"><b>2,89 $</b> <small>−31 % · p = 0,10</small></span></div>
+  <div class="row"><span>eco-after</span><div class="track"><div class="fill" style="width:60.5%"></div><div class="range" style="left:47.8%;width:23.5%"></div></div><span class="val">3,33 $ <small>−21 %</small></span></div>
+</div>
+<div class="chart">
+  <div class="title">Part des appels de fichiers des sous-agents passant par token-eco</div>
+  <div class="hint">Tâche longue t8, cumul des 3 exécutions par variante</div>
+  <div class="row"><span>Sonnet before</span><div class="track"><div class="fill cov" style="width:25%"></div></div><span class="val">25 %</span></div>
+  <div class="row"><span>Sonnet after</span><div class="track"><div class="fill cov" style="width:70%"></div></div><span class="val"><b>70 %</b></span></div>
+  <div class="row"><span>Opus before</span><div class="track"><div class="fill cov" style="width:25%"></div></div><span class="val">25 %</span></div>
+  <div class="row"><span>Opus after</span><div class="track"><div class="fill cov" style="width:64%"></div></div><span class="val"><b>64 %</b></span></div>
+  <div class="legend">Native : 0 % par construction. « after » = relecteur doté de token-eco <code>read</code>/<code>search</code>.</div>
+</div>
 <table>
 <tr><th>Orchestrateur</th><th>Variante</th><th class="n">Coût moyen ± é.-t. [min–max]</th><th class="n">vs native</th><th class="n">p</th><th class="n">Tours principal / sous-agents</th><th class="n">Couverture sous-agents</th><th class="n">Lectures via Bash</th></tr>
 <tr><td>Sonnet</td><td>native</td><td class="n">2,48 ± 0,36 [2,07–2,73]</td><td class="n">–</td><td class="n">–</td><td class="n">15,3 / 56,0</td><td class="n">0 %</td><td class="n">16,7 (128 Ko)</td></tr>
@@ -281,7 +419,7 @@ exécutions :</p>
     l'orchestrateur est coûteux, cela peut expliquer que eco-before fasse aussi bien qu'eco-after.</li>
 </ul>
 
-<h2 class="pb">10. Synthèse des conclusions et niveaux de preuve</h2>
+<h2 id="s10" class="pb"><span class="num">10</span>Synthèse des conclusions et niveaux de preuve</h2>
 <table>
 <tr><th>#</th><th>Conclusion</th><th>Niveau</th><th>Appui</th></tr>
 <tr><td>1</td><td>Les outils sont fidèles (rappel du plan 96–100 % en TS/JS/Python, 97 % en moyenne sur 15 langages) et renvoient 4 à 24 % de la taille d'une lecture complète.</td><td><span class="lvl l1">Établi</span></td><td>Bancs 1, 2</td></tr>
@@ -299,7 +437,7 @@ exécutions :</p>
 coûte moins cher ; sur des tâches courtes l'effet est nul ou de l'ordre de 10 %, et en usage réel il reste à démontrer — la condition
 première est l'adoption.</div>
 
-<h2>11. Menaces à la validité</h2>
+<h2 id="s11"><span class="num">11</span>Menaces à la validité</h2>
 <ul>
   <li><b>Statistique :</b> 3 essais par case (4 au banc 3) ; p minimal de 0,10 ; 14 comparaisons sans correction ; coefficients de variation
     de la référence de 14 à 21 % sur la tâche longue. Les ampleurs sont incertaines, seul le sens est cohérent.</li>
@@ -314,7 +452,7 @@ première est l'adoption.</div>
     réelle compte des centaines à des milliers de tours, contre 37 à 95 pour la tâche longue.</li>
 </ul>
 
-<h2>12. Recommandations</h2>
+<h2 id="s12"><span class="num">12</span>Recommandations</h2>
 <ul>
   <li><b>Puissance :</b> pour confirmer un effet de −30 % avec la variance observée, viser au moins 8 essais par variante sur la tâche longue.</li>
   <li><b>Ordre aléatoire</b> des variantes à chaque essai, et variante « agent eco seul, sans outils ni hook » pour séparer l'effet de l'agent
@@ -324,7 +462,7 @@ première est l'adoption.</div>
     <code>tools:</code> avant d'attendre une économie.</li>
 </ul>
 
-<h2>13. Annexes</h2>
+<h2 id="s13"><span class="num">13</span>Annexes</h2>
 <h3>Reproduction</h3>
 <table>
 <tr><th>Banc</th><th>Commande (dans <code>server/</code>)</th><th>Sortie</th></tr>
@@ -341,5 +479,9 @@ première est l'adoption.</div>
 <p><b>Couverture</b> : part des appels de fichiers passant par token-eco. <b>Orchestrateur</b> : fil principal qui délègue. <b>Sous-agent</b> :
 agent lancé par l'orchestrateur, avec son propre contexte. <b>Hook</b> : script exécuté par Claude Code avant chaque appel d'outil.
 <b>Séparation complète</b> : toutes les valeurs d'un groupe sont inférieures à toutes celles de l'autre.</p>
+</div>
+</main>
+</div>
+<script>for(const td of document.querySelectorAll("td.n")){const t=td.textContent.trim();const m=/^([+−-])\s?\d+ %$/.exec(t);if(!m)continue;const v=parseInt(t.replace("−","-"));td.innerHTML="<span class=\"pill "+(Math.abs(v)<5?"flat":v<0?"good":"bad")+"\">"+t+"</span>"}</script>
 </body>
 </html>
