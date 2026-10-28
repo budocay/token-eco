@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>token-eco — Rapport des benchmarks</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  body { font: 10.5pt/1.45 -apple-system, "Helvetica Neue", Arial, sans-serif; color: #1d2330; }
+  h1 { font-size: 22pt; margin: 0 0 4px; } h2 { font-size: 14pt; margin: 22px 0 6px; border-bottom: 2px solid #2b6cb0; padding-bottom: 3px; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 14px 0 4px; page-break-after: avoid; } p { margin: 5px 0; } ul, ol { margin: 4px 0 4px 18px; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 6px 0 8px; font-size: 8.8pt; page-break-inside: avoid; }
+  th, td { border: 1px solid #cfd6e0; padding: 3px 5px; text-align: left; vertical-align: top; } th { background: #eef2f7; }
+  td.n, th.n { text-align: right; white-space: nowrap; } .meta { color: #5a6475; font-size: 9.5pt; }
+  .box { border: 1px solid #cfd6e0; border-left: 4px solid #2b6cb0; background: #f6f8fb; padding: 7px 10px; margin: 8px 0; page-break-inside: avoid; }
+  .warn { border-left-color: #c05621; background: #fdf6f0; } .ok { border-left-color: #2f855a; background: #f2f9f5; }
+  .lvl { display: inline-block; font-size: 8pt; font-weight: 600; padding: 0 5px; border-radius: 3px; color: #fff; }
+  .l1 { background: #2f855a; } .l2 { background: #2b6cb0; } .l3 { background: #b7791f; } .l4 { background: #9b2c2c; }
+  .bar { display: inline-block; height: 9px; background: #2b6cb0; vertical-align: middle; } .bar.n { background: #a0aec0; }
+  code { font: 8.8pt ui-monospace, Menlo, monospace; background: #eef2f7; padding: 0 3px; border-radius: 2px; }
+  .small { font-size: 8.8pt; color: #4a5568; } .pb { page-break-before: always; }
+  .toc li { margin: 1px 0; }
+</style>
+</head>
+<body>
+
+<h1>token-eco — Rapport des benchmarks</h1>
+<p class="meta">Plugin Claude Code personnel · versions testées v0.3 à v0.7.4 · campagnes du 22 au 28 octobre 2026 ·
+document généré à partir des rapports et données brutes du dépôt (<code>server/bench/</code>).</p>
+
+<div class="box">
+<b>Résumé.</b> token-eco fournit à Claude Code des outils de lecture, recherche et édition de fichiers conçus pour renvoyer moins de
+tokens, un agent principal qui les impose, une consigne injectée aux sous-agents et un hook qui compacte les sorties Bash et
+redirige les lectures de gros fichiers. Six séries de mesures ont été menées. <b>(1)</b> Hors ligne, les outils renvoient
+4 à 24 % de la taille d'une lecture complète avec une fidélité structurelle de 92 à 100 % (TS, JS, Python), et la recherche
+compacte donne les mêmes résultats que <code>grep</code> pour 47 % de ses tokens. <b>(2)</b> En A/B mono-agent sur des tâches
+courtes (Sonnet), le coût baisse de 8 à 10 % sans perte de réussite (56/56). <b>(3)</b> Sur des sessions réelles scénarisées,
+aucune économie en dollars n'est démontrée avec Sonnet (−7 % à +22 % selon les runs) ; un run Opus donne −13 %.
+<b>(4)</b> En usage réel (30 jours de logs), les outils n'étaient presque pas utilisés (4,7 % du fil principal, 1,2 % des
+sous-agents) : un autre plugin imposait son agent et des agents de projet n'avaient pas accès aux outils. <b>(5)</b> Dans un
+banc multi-agents reproduisant cette situation (63 exécutions, toutes réussies), donner les outils au relecteur fait passer
+sa couverture de 0 % à 39–93 % ; sur des tâches courtes le coût ne change pas de façon mesurable, tandis que sur une tâche
+longue (5 délégations) les variantes token-eco coûtent <b>19 à 48 % de moins</b> que la référence, avec une séparation
+complète des valeurs dans deux cas sur quatre (p = 0,10, plus petite valeur atteignable avec 3 essais). Une partie de ce gain
+vient de l'agent principal (moins de tours d'orchestration), pas seulement des outils. Aucun résultat n'atteint le seuil
+conventionnel de 5 % : ce sont des tendances cohérentes, pas des preuves.
+</div>
+
+<h2>Sommaire</h2>
+<ol class="toc">
+  <li>Contexte et questions</li><li>Système étudié</li><li>Méthode commune et définitions</li>
+  <li>Banc 1 — Qualité hors ligne (TS, JS, Python)</li><li>Banc 2 — Qualité multi-langages</li>
+  <li>Banc 3 — A/B mono-agent en conditions réelles</li><li>Banc 4 — Sessions réelles scénarisées</li>
+  <li>Observation 5 — Usage réel sur 30 jours</li><li>Banc 6 — Adoption multi-agents (campagnes A1, A2, A3)</li>
+  <li>Synthèse des conclusions et niveaux de preuve</li><li>Menaces à la validité</li><li>Recommandations</li>
+  <li>Annexes : reproduction, coûts, glossaire</li>
+</ol>
+
+<h2>1. Contexte et questions</h2>
+<p>Dans Claude Code, chaque appel d'outil est un tour complet : le modèle relit tout le contexte (depuis le cache de prompt),
+puis le résultat de l'outil est ajouté au contexte et relu à chaque tour suivant. Le coût d'une session dépend donc de la
+taille des résultats, du nombre de tours et de la taille du contexte accumulé. token-eco cherche à réduire les deux premiers.
+Les mesures visent à répondre aux questions suivantes :</p>
+<ul>
+  <li><b>Q1 — Fidélité et taille :</b> les outils renvoient-ils la bonne information, et combien de tokens économisent-ils par appel ?</li>
+  <li><b>Q2 — Coût en conditions contrôlées :</b> à tâche égale, une session avec token-eco coûte-t-elle moins cher, sans perte de réussite ?</li>
+  <li><b>Q3 — Adoption réelle :</b> dans l'usage quotidien, les agents appellent-ils vraiment ces outils ?</li>
+  <li><b>Q4 — Multi-agents :</b> dans un projet où un orchestrateur délègue à des agents spécialisés, qu'apportent les outils, et
+    selon la longueur de la tâche ?</li>
+</ul>
+
+<h2>2. Système étudié</h2>
+<table>
+<tr><th>Composant</th><th>Rôle</th><th>Présent dans les variantes « eco »</th></tr>
+<tr><td>Serveur MCP : <code>read</code>, <code>search</code>, <code>edit</code></td><td>lecture d'un symbole, d'une plage ou d'un plan ;
+  recherche groupée par fichier ; remplacements groupés en un appel ; tous acceptent des lots</td><td>oui</td></tr>
+<tr><td>Agent principal <code>token-eco:eco</code></td><td>remplace l'agent par défaut ; Read/Grep/Glob/Edit natifs retirés ; consignes de
+  regroupement (« une recherche, une lecture, une édition par étape », concision)</td><td>oui</td></tr>
+<tr><td>Consigne de session</td><td>~6 lignes injectées au démarrage de la session et de chaque sous-agent</td><td>oui</td></tr>
+<tr><td>Hook PreToolUse</td><td>compacte les sorties Bash bruyantes (tests, builds, git) ; refuse une fois la lecture complète d'un gros fichier
+  en renvoyant son plan (seuil : &gt; 300 lignes, et depuis v0.7.4 &gt; 6 000 tokens)</td><td>oui</td></tr>
+</table>
+<p class="small">Une variante « eco » change donc plusieurs choses à la fois par rapport à la référence. Les bancs 3 et 6 mesurent
+l'effet de l'ensemble ; seul le contraste eco-before / eco-after du banc 6 isole un facteur (l'accès du relecteur aux outils).</p>
+
+<h2>3. Méthode commune et définitions</h2>
+<ul>
+  <li><b>Coût :</b> <code>total_cost_usd</code> renvoyé par Claude Code en fin de session (sous-agents compris), c'est-à-dire le prix
+    équivalent API. Les exécutions passent par un abonnement : ce montant mesure la consommation, il n'est pas facturé tel quel.</li>
+  <li><b>Tours :</b> nombre de réponses du modèle (fil principal / sous-agents), lu dans les journaux de session
+    (<code>~/.claude/projects/</code>), avec dédoublonnage des messages répartis sur plusieurs lignes.</li>
+  <li><b>Couverture :</b> appels token-eco <code>read/search/edit</code> ÷ (ces appels + Read/Grep/Glob/Edit/MultiEdit natifs).</li>
+  <li><b>Lectures via Bash :</b> appels Bash commençant par <code>cat</code>, <code>head</code>, <code>tail</code>, <code>sed -n</code>,
+    <code>grep</code>, <code>rg</code>, <code>find</code>, <code>awk</code> ; taille = taille du résultat.</li>
+  <li><b>Réussite :</b> vérification automatique propre à chaque tâche (réponse attendue, fichiers modifiés, suite de tests, test caché).</li>
+  <li><b>Référence étanche (« native ») :</b> outils token-eco interdits, hook désactivé, et depuis le banc 6 la copie du plugin installée
+    sur le compte désactivée (sans quoi son agent s'appliquait aussi à la référence — défaut détecté et corrigé le 27/10).</li>
+  <li><b>Statistiques :</b> moyenne ± écart-type, minimum–maximum ; comparaison à la référence par un <b>test de permutation exact
+    bilatéral</b> sur le coût. Avec 3 essais contre 3, il n'existe que 20 partitions : la plus petite valeur de p possible est
+    <b>0,10</b>, obtenue quand les 3 valeurs d'un groupe sont toutes inférieures aux 3 de l'autre (séparation complète).
+    Aucune correction pour comparaisons multiples n'est appliquée ; aucun résultat ne serait significatif après correction.</li>
+</ul>
+<p>Niveaux de preuve utilisés dans la synthèse :
+<span class="lvl l1">Établi</span> mesure directe, reproductible, sans ambiguïté ·
+<span class="lvl l2">Fort</span> effet net et cohérent, petit échantillon ·
+<span class="lvl l3">Indicatif</span> tendance, variance élevée ou un seul run ·
+<span class="lvl l4">Non démontré</span>.</p>
+
+<h2 class="pb">4. Banc 1 — Qualité hors ligne (TS, JS, Python)</h2>
+<p><b>Objectif :</b> Q1. Vérifier que le plan d'un fichier et la lecture d'un symbole sont fidèles, et mesurer leur taille par rapport à
+la lecture complète. <b>Périmètre :</b> 263 fichiers (zod et ajv en TypeScript, SDK MCP compilé en JavaScript, bibliothèque standard
+Python 3.15), 2 666 symboles. <b>Méthode :</b> comparaison à une vérité terrain issue de l'arbre syntaxique réel (compilateur
+TypeScript, module <code>ast</code> de Python) ; tokens estimés à 4 caractères par token ; référence = Read natif (2 000 lignes au plus).
+Gratuit, déterministe (<code>npm run bench</code>, 6,7 s).</p>
+<table>
+<tr><th>Corpus</th><th class="n">Fichiers</th><th class="n">Rappel du plan</th><th class="n">Précision du plan</th><th class="n">Taille plan / Read (moy. ; méd.)</th><th class="n">Symbole exact / bon début (n)</th><th class="n">Taille symbole / Read</th></tr>
+<tr><td>TypeScript</td><td class="n">88</td><td class="n">95,7 %</td><td class="n">92,0 %</td><td class="n">21,6 % ; 9,9 %</td><td class="n">96,7 % / 99,5 % (569)</td><td class="n">4,8 %</td></tr>
+<tr><td>JavaScript</td><td class="n">40</td><td class="n">100 %</td><td class="n">98,5 %</td><td class="n">5,7 % ; 6,4 %</td><td class="n">99,7 % / 100 % (295)</td><td class="n">9,5 %</td></tr>
+<tr><td>Python</td><td class="n">135</td><td class="n">99,0 %</td><td class="n">100 %</td><td class="n">7,8 % ; 7,6 %</td><td class="n">100 % / 100 % (1 802)</td><td class="n">3,9 %</td></tr>
+</table>
+<p><b>Recherche compacte vs <code>grep -rn</code></b> (10 motifs sur zod) : décompte identique pour 10 motifs sur 10 ; 47,3 % des tokens de
+<code>grep -rn</code> au total, mais plus que <code>grep -rn</code> sur les motifs à 0–2 résultats (en-tête fixe), et plus que le Grep natif
+par défaut, qui ne renvoie que la liste des fichiers (104 tokens au total).</p>
+<p><b>Conclusion :</b> <span class="lvl l1">Établi</span> les outils sont fidèles et renvoient 4 à 22 % de la taille d'une lecture complète.
+<b>Limites :</b> mesure de taille par appel, pas d'une session ; l'économie réelle dépend de ce que l'agent aurait lu à la place.</p>
+
+<h2>5. Banc 2 — Qualité multi-langages</h2>
+<p><b>Objectif :</b> Q1 hors des trois langages principaux. <b>Périmètre :</b> 15 langages, jusqu'à 50 fichiers chacun, dépôts open source.
+<b>Méthode :</b> vérité terrain universal-ctags (<code>node bench/languages.ts</code>).</p>
+<p><b>Résultats globaux :</b> rappel du plan 96,9 %, lecture de symbole exacte 92,8 %. Taille du plan : 4,6 % (shell) à 23,5 % (PHP) de la
+lecture complète. Points faibles mesurés : précision du plan en C (26,6 %, minorant car ctags ignore certaines déclarations), Java
+et C# (≈ 68 %), lecture de symbole en Elixir (40,3 % exacte). Swift, Scala et Dart : pas de vérité terrain disponible.</p>
+<p><b>Conclusion :</b> <span class="lvl l1">Établi</span> fidélité élevée pour la plupart des langages, avec des faiblesses identifiées (C, Java,
+C#, Elixir).</p>
+
+<h2>6. Banc 3 — A/B mono-agent en conditions réelles</h2>
+<p><b>Objectif :</b> Q2. <b>Périmètre :</b> 5 tâches courtes (comprendre, chercher, éditer, mini-session, fonctionnalité avec tests) sur
+zod/src/v3 et sur le serveur du plugin ; Claude Code en mode non interactif (<code>claude -p</code>), Sonnet, 4 essais par tâche et par mode.
+<b>Méthode :</b> chaque essai sur une copie jetable ; échauffement non compté pour neutraliser le cache froid ; réussite vérifiée.</p>
+<table>
+<tr><th>Version</th><th>Tâche</th><th class="n">Coût natif</th><th class="n">Coût eco</th><th class="n">Écart</th><th class="n">Tours natif / eco</th><th class="n">Réussite</th></tr>
+<tr><td>v0.3</td><td>t1 comprendre</td><td class="n">0,141 $</td><td class="n">0,145 $</td><td class="n">+3 %</td><td class="n">2,8 / 3,0</td><td class="n">4/4 · 4/4</td></tr>
+<tr><td>v0.3</td><td>t2 chercher</td><td class="n">0,135 $</td><td class="n">0,125 $</td><td class="n">−7 %</td><td class="n">2,0 / 2,0</td><td class="n">4/4 · 4/4</td></tr>
+<tr><td>v0.3</td><td>t3 éditer</td><td class="n">0,145 $</td><td class="n">0,127 $</td><td class="n">−12 %</td><td class="n">5,0 / 3,0</td><td class="n">4/4 · 4/4</td></tr>
+<tr><td>v0.3</td><td>t4 mini-session</td><td class="n">0,158 $</td><td class="n">0,142 $</td><td class="n">−10 %</td><td class="n">4,5 / 4,0</td><td class="n">4/4 · 4/4</td></tr>
+<tr><td>v0.3</td><td>t5 fonctionnalité</td><td class="n">0,187 $</td><td class="n">0,167 $</td><td class="n">−11 %</td><td class="n">8,0 / 6,3</td><td class="n">4/4 · 4/4</td></tr>
+<tr><td>v0.4.1</td><td>t4 mini-session</td><td class="n">0,147 $</td><td class="n">0,131 $</td><td class="n">−11 %</td><td class="n">4,5 / 4,0</td><td class="n">4/4 · 4/4</td></tr>
+<tr><td>v0.4.1</td><td>t5 fonctionnalité</td><td class="n">0,174 $</td><td class="n">0,158 $</td><td class="n">−9 %</td><td class="n">7,5 / 4,5</td><td class="n">4/4 · 4/4</td></tr>
+</table>
+<p>Total v0.3 : −8 % (0,765 $ → 0,706 $) ; total v0.4.1 : −10 % (0,321 $ → 0,288 $). Coût fixe par exécution ≈ 32 000 tokens écrits en
+cache, qui pèse lourd sur des tâches de cette taille. Sur t4 et t4/t5 v0.4.1, toutes les sessions eco ont utilisé exactement
+<code>search → read → edit</code> au lieu de Grep, Read et plusieurs Edit.</p>
+<p><b>Conclusion :</b> <span class="lvl l2">Fort</span> sur des tâches courtes mono-agent, −8 à −10 % de coût sans perte de réussite (40/40 en v0.3,
+16/16 en v0.4.1), principalement par moins de tours. <b>Limites :</b> tâches courtes et conçues pour l'outil ; pas de test statistique ; à
+l'époque, la référence n'était pas protégée contre l'agent du plugin installé (défaut découvert plus tard, voir §11).</p>
+
+<h2>7. Banc 4 — Sessions réelles scénarisées</h2>
+<p><b>Objectif :</b> Q2 sur une session complète. <b>Périmètre :</b> une session en 6 étapes sur la bibliothèque click 8.5.0 (explorer,
+corriger un bug, ajouter un type, renommer dans plusieurs fichiers, relecture par un sous-agent, changelog), mêmes prompts, cache chaud,
+9 contrôles d'acceptation cachés. <b>Méthode :</b> coût réel lu dans les journaux (<code>bench/session-cost.ts</code>), comparé à Claude Code
+sans plugin. <b>Source :</b> résultats consignés dans le README ; rapports bruts non conservés.</p>
+<table>
+<tr><th>Run</th><th>Version, modèle</th><th class="n">Outils seuls (mode par défaut d'alors)</th><th class="n">Agent strict eco</th></tr>
+<tr><td>1</td><td>v0.4, Sonnet (corrigé du cache froid)</td><td class="n">+17 %</td><td class="n">–</td></tr>
+<tr><td>2</td><td>v0.4, Sonnet</td><td class="n">−7 %</td><td class="n">–</td></tr>
+<tr><td>3</td><td>v0.5.0, Sonnet</td><td class="n">0 %</td><td class="n">−5 %</td></tr>
+<tr><td>4</td><td>v0.5.1, Sonnet</td><td class="n">+22 %</td><td class="n">+6 %</td></tr>
+<tr><td>5</td><td>v0.5.3, Opus</td><td class="n">−1 % (tokens −14 %)</td><td class="n">−13 % (tokens −32 %, 27 tours contre 37)</td></tr>
+</table>
+<p>Toutes les sessions ont passé 9/9. Tokens réellement traités, agent strict : −10 % (run 3) et −6 % (run 4).</p>
+<p><b>Conclusion :</b> <span class="lvl l4">Non démontré</span> pas d'économie en dollars avec Sonnet sur une session complète : la variance d'une
+session à l'autre (±15 % et plus) dépasse l'effet. <span class="lvl l3">Indicatif</span> avec Opus et l'agent strict, −13 % (un seul run).
+Explication observée : Sonnet seul lit déjà avec parcimonie (<code>grep</code>, <code>sed -n</code> enchaînés), alors qu'Opus seul lit des
+fichiers entiers.</p>
+
+<h2>8. Observation 5 — Usage réel sur 30 jours</h2>
+<p><b>Nature :</b> étude observationnelle, pas une expérience. <b>Objectif :</b> Q3. <b>Périmètre :</b> journaux Claude Code de l'auteur sur
+30 jours, plusieurs projets, hors dossiers de benchmark et temporaires. <b>Méthode :</b> lecture des journaux par le tableau de bord du plugin.</p>
+<table>
+<tr><th></th><th class="n">Appels token-eco</th><th class="n">Appels natifs</th><th class="n">Couverture</th></tr>
+<tr><td>Fil principal</td><td class="n">21</td><td class="n">445</td><td class="n">4,7 %</td></tr>
+<tr><td>Sous-agents</td><td class="n">112</td><td class="n">9 685</td><td class="n">1,2 %</td></tr>
+</table>
+<p>Économie estimée : environ 3,41 $ sur 4 283 $ (&lt; 0,1 %) ; les sous-agents pesaient 44 % du coût. <b>Causes identifiées dans les
+journaux :</b> (a) un autre plugin imposait son propre agent principal, qui l'emportait sur <code>token-eco:eco</code> ; (b) les agents en
+lecture seule du projet (relecteurs, sécurité, architecture) n'avaient que <code>Read, Grep, Glob</code>, liste produite par un générateur
+du projet ; (c) les sous-agents lisaient via Bash : sur 9 680 appels, <code>cat</code> a renvoyé 8 Mo, <code>sed -n</code> 7 Mo,
+<code>grep</code> 4,8 Mo.</p>
+<p><b>Après correction</b> (même jour, autre plugin retiré, relecteurs équipés de <code>read</code>/<code>search</code>) : sur quelques heures
+d'un projet, un relecteur a utilisé token-eco pour 55 % de ses appels de fichiers (62 contre 50, 0 % avant) ; un agent producteur 21 %
+(50 contre 191).</p>
+<p><b>Conclusion :</b> <span class="lvl l1">Établi</span> avant correction, les outils n'étaient presque pas utilisés : aucune économie ne
+pouvait en résulter, quelle que soit leur qualité. <span class="lvl l3">Indicatif</span> l'adoption remonte une fois les causes levées
+(un projet, quelques heures).</p>
+
+<h2 class="pb">9. Banc 6 — Adoption multi-agents</h2>
+<p><b>Objectif :</b> Q3 et Q4 en conditions contrôlées : reproduire la situation observée en usage réel, mesurer l'adoption des outils
+par des sous-agents et son effet sur le coût, selon la longueur de la tâche. <b>Outil :</b> <code>server/bench/adoption.ts</code>,
+statistiques <code>server/bench/adoption-stats.ts</code>.</p>
+<h3>9.1 Protocole</h3>
+<ul>
+  <li><b>Projet de test</b> (copie neuve dans <code>/tmp</code> à chaque exécution) : le serveur du plugin et ses 35 tests ; deux
+    spécifications Markdown de 454 lignes (~3 600 tokens chacune) dont les exigences utiles sont enfouies au milieu ; un
+    <code>CLAUDE.md</code> « tu es l'orchestrateur, tu délègues » ; un agent <code>reviewer</code> en lecture seule avec une liste
+    <code>tools:</code> ; un agent <code>producer</code> sans liste.</li>
+  <li><b>Variantes :</b> <i>native</i> (plugin désactivé, référence) ; <i>eco-before</i> (plugin, agent eco, hook ; relecteur limité à
+    <code>Read, Grep, Glob</code>, situation avant correction) ; <i>eco-after</i> (idem, relecteur doté en plus de token-eco
+    <code>read</code>/<code>search</code>).</li>
+  <li><b>Tâches :</b> <i>t6</i> faire relire le code au regard d'une spécification et lister 3 écarts cachés (vérifié : les 3 constantes et
+    valeurs citées) ; <i>t7</i> faire implémenter une exigence (vérifié : suite de tests + test caché) ; <i>t8, tâche longue</i> enchaîner
+    5 délégations (relecture, correction des 3 écarts, nouvelle relecture, implémentation, relecture finale ; vérifié : 3 constantes
+    corrigées, suite complète et test caché).</li>
+  <li><b>Modèles :</b> orchestrateur Sonnet 5.5 ou Opus 5.5 ; les sous-agents ont tourné sur Sonnet 5.5 dans tous les cas, via le réglage
+    <code>CLAUDE_CODE_SUBAGENT_MODEL</code> du compte, comme en usage réel.</li>
+  <li><b>Contrôles :</b> exécution écartée si l'agent principal n'est pas celui attendu, si la référence utilise token-eco, ou en cas
+    d'erreur d'infrastructure (réseau, abonnement). Ordre fixe à chaque essai : native, eco-before, eco-after.</li>
+  <li><b>Exécutions :</b> 63 valides, <b>63 réussies</b> ; 5 écartées (perte de réseau, abonnement suspendu), relancées.</li>
+</ul>
+
+<h3>9.2 Campagne A1 — tâches courtes, v0.7.3 (36 exécutions)</h3>
+<table>
+<tr><th>Orchestrateur</th><th>Tâche</th><th>Variante</th><th class="n">Coût moyen ± é.-t. [min–max]</th><th class="n">vs native</th><th class="n">p</th><th class="n">Couverture relecteur / producteur</th><th class="n">Lectures via Bash</th></tr>
+<tr><td>Sonnet</td><td>t6</td><td>native</td><td class="n">0,194 ± 0,038 [0,171–0,238]</td><td class="n">–</td><td class="n">–</td><td class="n">0 %</td><td class="n">0</td></tr>
+<tr><td>Sonnet</td><td>t6</td><td>eco-before</td><td class="n">0,238 ± 0,015 [0,221–0,252]</td><td class="n">+22 %</td><td class="n">0,20</td><td class="n">0 %</td><td class="n">0</td></tr>
+<tr><td>Sonnet</td><td>t6</td><td>eco-after</td><td class="n">0,237 ± 0,020 [0,214–0,253]</td><td class="n">+22 %</td><td class="n">0,20</td><td class="n">67 %</td><td class="n">0</td></tr>
+<tr><td>Sonnet</td><td>t7</td><td>native</td><td class="n">0,262 ± 0,010</td><td class="n">–</td><td class="n">–</td><td class="n">–</td><td class="n">3,3 (16 Ko)</td></tr>
+<tr><td>Sonnet</td><td>t7</td><td>eco-before</td><td class="n">0,265 ± 0,018</td><td class="n">+1 %</td><td class="n">0,80</td><td class="n">100 %</td><td class="n">0,7</td></tr>
+<tr><td>Sonnet</td><td>t7</td><td>eco-after</td><td class="n">0,259 ± 0,003</td><td class="n">−1 %</td><td class="n">0,60</td><td class="n">100 %</td><td class="n">1,0</td></tr>
+<tr><td>Opus</td><td>t6</td><td>native</td><td class="n">0,391 ± 0,018</td><td class="n">–</td><td class="n">–</td><td class="n">0 %</td><td class="n">0</td></tr>
+<tr><td>Opus</td><td>t6</td><td>eco-before</td><td class="n">0,406 ± 0,033</td><td class="n">+4 %</td><td class="n">0,60</td><td class="n">0 %</td><td class="n">0</td></tr>
+<tr><td>Opus</td><td>t6</td><td>eco-after</td><td class="n">0,369 ± 0,021</td><td class="n">−6 %</td><td class="n">0,30</td><td class="n">39 %</td><td class="n">0</td></tr>
+<tr><td>Opus</td><td>t7</td><td>native</td><td class="n">0,399 ± 0,023</td><td class="n">–</td><td class="n">–</td><td class="n">–</td><td class="n">3,0 (15 Ko)</td></tr>
+<tr><td>Opus</td><td>t7</td><td>eco-before</td><td class="n">0,394 ± 0,017</td><td class="n">−1 %</td><td class="n">0,80</td><td class="n">100 %</td><td class="n">2,0</td></tr>
+<tr><td>Opus</td><td>t7</td><td>eco-after</td><td class="n">0,386 ± 0,006</td><td class="n">−3 %</td><td class="n">0,50</td><td class="n">90 %</td><td class="n">0,7</td></tr>
+</table>
+<p class="small">Couverture : relecteur pour t6, producteur pour t7 (agrégée sur les 3 essais). 3 essais par case, 36/36 réussis, 11,40 $.</p>
+
+<h3>9.3 Diagnostic du surcoût de t6 avec Sonnet (+22 %)</h3>
+<p>Le surcoût est identique avec et sans relecteur équipé : il ne vient donc pas de l'accès aux outils. Analyse des journaux des 36
+exécutions :</p>
+<ul>
+  <li><b>Pas un coût fixe de contexte :</b> contexte du premier tour (médiane) — fil principal 27,5 K tokens en eco contre 33,0 K en native
+    (l'agent eco retire des outils) ; sous-agent 23,2 K contre 21,1 K.</li>
+  <li><b>Pas un défaut de cache propre au plugin :</b> sondes « Reply OK » (5 exécutions, ~0,50 $) — en changeant de dossier, environ
+    20 K tokens sont réécrits en cache dans les deux variantes ; dans le même dossier, tout est relu.</li>
+  <li><b>Cause : le hook.</b> Décomposition (Sonnet, t6) : coût des sous-agents 0,05 $ en native contre 0,12–0,13 $ en eco. Le relecteur eco
+    lisait la spécification ; le hook refusait (454 lignes &gt; 300) en renvoyant le plan et en conseillant l'outil <code>read</code> que ce
+    relecteur n'avait pas ; il relançait la lecture complète (autorisée à la seconde tentative), puis lisait 6 fichiers source en entier.
+    Le relecteur natif lisait la spécification puis faisait une seule recherche ciblée (311 tokens).</li>
+  <li><b>Correctif v0.7.4 :</b> la lecture complète n'est redirigée que si le fichier dépasse aussi 6 000 tokens. Une spécification
+    Markdown de 454 lignes courtes (~3 600 tokens) n'est plus redirigée.</li>
+</ul>
+
+<h3>9.4 Campagne A2 — t6 répété après correctif, v0.7.4, Sonnet (9 exécutions)</h3>
+<table>
+<tr><th>Variante</th><th class="n">Coût moyen ± é.-t. [min–max]</th><th class="n">vs native</th><th class="n">p</th><th class="n">Couverture relecteur</th><th class="n">Réussite</th></tr>
+<tr><td>native</td><td class="n">0,219 ± 0,033 [0,190–0,255]</td><td class="n">–</td><td class="n">–</td><td class="n">0 %</td><td class="n">3/3</td></tr>
+<tr><td>eco-before</td><td class="n">0,194 ± 0,022 [0,169–0,210]</td><td class="n">−11 %</td><td class="n">0,40</td><td class="n">0 %</td><td class="n">3/3</td></tr>
+<tr><td>eco-after</td><td class="n">0,228 ± 0,015 [0,210–0,237]</td><td class="n">+4 %</td><td class="n">0,70</td><td class="n">93 %</td><td class="n">3/3</td></tr>
+</table>
+<p>Le surcoût de +22 % disparaît (−11 % et +4 %, non significatifs). La moyenne de la référence varie elle-même de 13 % entre A1 et A2
+(0,194 $ contre 0,219 $) : c'est l'ordre de grandeur du bruit entre campagnes.</p>
+
+<h3>9.5 Campagne A3 — tâche longue t8, v0.7.4 (18 exécutions)</h3>
+<table>
+<tr><th>Orchestrateur</th><th>Variante</th><th class="n">Coût moyen ± é.-t. [min–max]</th><th class="n">vs native</th><th class="n">p</th><th class="n">Tours principal / sous-agents</th><th class="n">Couverture sous-agents</th><th class="n">Lectures via Bash</th></tr>
+<tr><td>Sonnet</td><td>native</td><td class="n">2,48 ± 0,36 [2,07–2,73]</td><td class="n">–</td><td class="n">–</td><td class="n">15,3 / 56,0</td><td class="n">0 %</td><td class="n">16,7 (128 Ko)</td></tr>
+<tr><td>Sonnet</td><td>eco-before</td><td class="n">2,02 ± 0,65 [1,28–2,52]</td><td class="n">−19 %</td><td class="n">0,40</td><td class="n">6,7 / 45,7</td><td class="n">25 %</td><td class="n">8,7 (52 Ko)</td></tr>
+<tr><td>Sonnet</td><td>eco-after</td><td class="n">1,30 ± 0,45 [1,00–1,82]</td><td class="n"><b>−48 %</b></td><td class="n"><b>0,10</b></td><td class="n">5,3 / 31,7</td><td class="n">70 %</td><td class="n">5,0 (32 Ko)</td></tr>
+<tr><td>Opus</td><td>native</td><td class="n">4,21 ± 0,90 [3,59–5,25]</td><td class="n">–</td><td class="n">–</td><td class="n">20,0 / 74,3</td><td class="n">0 %</td><td class="n">8,3 (42 Ko)</td></tr>
+<tr><td>Opus</td><td>eco-before</td><td class="n">2,89 ± 0,24 [2,74–3,16]</td><td class="n"><b>−31 %</b></td><td class="n"><b>0,10</b></td><td class="n">11,0 / 54,0</td><td class="n">25 %</td><td class="n">2,7 (25 Ko)</td></tr>
+<tr><td>Opus</td><td>eco-after</td><td class="n">3,33 ± 0,65 [2,63–3,92]</td><td class="n">−21 %</td><td class="n">0,30</td><td class="n">12,3 / 58,7</td><td class="n">64 %</td><td class="n">11,0 (96 Ko)</td></tr>
+</table>
+<p>18/18 réussies, 48,64 $. p = 0,10 signifie que les trois coûts de la variante sont tous inférieurs aux trois coûts de la référence.</p>
+<ul>
+  <li><b>Les quatre variantes token-eco coûtent moins que la référence</b> (−19 à −48 %) ; deux avec séparation complète.</li>
+  <li><b>Effet de l'équipement du relecteur (eco-after contre eco-before) :</b> couverture des sous-agents 25 % → 64–70 % dans les deux cas ;
+    coût −36 % avec Sonnet (p = 0,20) mais +15 % avec Opus (p = 0,40). Effet sur le coût non établi.</li>
+  <li><b>Facteur de confusion identifié :</b> le fil principal n'appelle aucun outil de fichier dans aucune variante (0 appel), mais fait
+    35 à 65 % de tours en moins sous l'agent eco (15,3 → 5,3–6,7 avec Sonnet ; 20,0 → 11,0–12,3 avec Opus). Une part du gain vient donc
+    des consignes de l'agent principal (regrouper, être concis), indépendamment des outils de fichiers. Avec Opus, où seul
+    l'orchestrateur est coûteux, cela peut expliquer que eco-before fasse aussi bien qu'eco-after.</li>
+</ul>
+
+<h2 class="pb">10. Synthèse des conclusions et niveaux de preuve</h2>
+<table>
+<tr><th>#</th><th>Conclusion</th><th>Niveau</th><th>Appui</th></tr>
+<tr><td>1</td><td>Les outils sont fidèles (rappel du plan 96–100 % en TS/JS/Python, 97 % en moyenne sur 15 langages) et renvoient 4 à 24 % de la taille d'une lecture complète.</td><td><span class="lvl l1">Établi</span></td><td>Bancs 1, 2</td></tr>
+<tr><td>2</td><td>Sur des tâches courtes mono-agent, token-eco réduit le coût de 8 à 10 % sans perte de réussite, surtout par moins de tours.</td><td><span class="lvl l2">Fort</span></td><td>Banc 3 (28 exécutions par mode)</td></tr>
+<tr><td>3</td><td>Un outil qui n'est pas appelé n'économise rien : en usage réel, la couverture était de 1–5 % à cause d'un conflit d'agent et d'agents sans accès aux outils.</td><td><span class="lvl l1">Établi</span></td><td>Observation 5</td></tr>
+<tr><td>4</td><td>Donner les outils à un agent à liste <code>tools:</code> restreinte fait passer sa couverture de 0 % à 39–93 %.</td><td><span class="lvl l1">Établi</span></td><td>Banc 6, toutes les cases</td></tr>
+<tr><td>5</td><td>Une redirection de lecture sur un fichier moyen (≈ 3,6 K tokens) coûte plus qu'elle n'économise ; le seuil en tokens (v0.7.4) supprime ce surcoût.</td><td><span class="lvl l2">Fort</span></td><td>9.3 (mécanisme dans les journaux), 9.4</td></tr>
+<tr><td>6</td><td>Sur des tâches multi-agents courtes, pas de différence de coût mesurable (−11 % à +4 % après correctif).</td><td><span class="lvl l2">Fort</span></td><td>A1 t7, A2</td></tr>
+<tr><td>7</td><td>Sur une tâche multi-agents longue, token-eco réduit le coût (−19 à −48 % selon le modèle et la variante).</td><td><span class="lvl l2">Fort</span> pour le sens, <span class="lvl l3">Indicatif</span> pour l'ampleur</td><td>A3 : 4/4 cases, 2 séparations complètes, n = 3</td></tr>
+<tr><td>8</td><td>Une part du gain vient de l'agent principal (moins de tours d'orchestration), pas seulement des outils de fichiers.</td><td><span class="lvl l2">Fort</span></td><td>A3 : tours du fil principal −35 à −65 %, 0 appel de fichier</td></tr>
+<tr><td>9</td><td>Équiper le relecteur réduit le coût total de la session.</td><td><span class="lvl l4">Non démontré</span></td><td>A3 : −36 % (Sonnet, p = 0,20), +15 % (Opus, p = 0,40)</td></tr>
+<tr><td>10</td><td>token-eco réduit la facture en usage réel.</td><td><span class="lvl l4">Non démontré</span></td><td>Banc 4 (Sonnet) ; usage réel à suivre</td></tr>
+</table>
+<div class="box ok"><b>En une phrase :</b> les outils sont bons et, quand ils sont réellement utilisés dans une session longue, la session
+coûte moins cher ; sur des tâches courtes l'effet est nul ou de l'ordre de 10 %, et en usage réel il reste à démontrer — la condition
+première est l'adoption.</div>
+
+<h2>11. Menaces à la validité</h2>
+<ul>
+  <li><b>Statistique :</b> 3 essais par case (4 au banc 3) ; p minimal de 0,10 ; 14 comparaisons sans correction ; coefficients de variation
+    de la référence de 14 à 21 % sur la tâche longue. Les ampleurs sont incertaines, seul le sens est cohérent.</li>
+  <li><b>Validité interne :</b> ordre des variantes fixe (native, eco-before, eco-after) et non aléatoire : un effet d'ordre ou d'heure
+    (charge de l'API, cache) n'est pas exclu ; variantes eco = plusieurs facteurs à la fois (agent, consigne, outils, hook) ;
+    jusqu'au 27/10, la référence pouvait hériter de l'agent du plugin installé (bancs 3 et 4 potentiellement concernés,
+    non vérifiable a posteriori) ; une exécution écartée à la main (coupure réseau en cours d'exécution).</li>
+  <li><b>Validité de construit :</b> coût = prix équivalent API calculé par Claude Code ; couverture = nombre d'appels, pas tokens ; détection
+    des lectures via Bash par motif de commande (heuristique) ; tokens estimés à 4 caractères (bancs 1–2).</li>
+  <li><b>Validité externe :</b> projets de test petits (≈ 35 tests, 2 spécifications) et tâches conçues par l'auteur du plugin ; un seul
+    utilisateur ; sous-agents toujours sur Sonnet ; versions de Claude Code 2.1.29x–2.1.31x, dont le comportement évolue ; une session
+    réelle compte des centaines à des milliers de tours, contre 37 à 95 pour la tâche longue.</li>
+</ul>
+
+<h2>12. Recommandations</h2>
+<ul>
+  <li><b>Puissance :</b> pour confirmer un effet de −30 % avec la variance observée, viser au moins 8 essais par variante sur la tâche longue.</li>
+  <li><b>Ordre aléatoire</b> des variantes à chaque essai, et variante « agent eco seul, sans outils ni hook » pour séparer l'effet de l'agent
+    principal de celui des outils.</li>
+  <li><b>Suivi réel</b> sur deux semaines avec le tableau de bord (colonne Agent, couverture, coût par tour) après les corrections.</li>
+  <li><b>Déploiement :</b> vérifier l'agent principal actif et donner <code>read</code>/<code>search</code> aux agents à liste
+    <code>tools:</code> avant d'attendre une économie.</li>
+</ul>
+
+<h2>13. Annexes</h2>
+<h3>Reproduction</h3>
+<table>
+<tr><th>Banc</th><th>Commande (dans <code>server/</code>)</th><th>Sortie</th></tr>
+<tr><td>1</td><td><code>npm run bench</code></td><td><code>bench/RESULTS.md</code></td></tr>
+<tr><td>2</td><td><code>node bench/languages.ts</code></td><td><code>bench/LANGUAGES.md</code></td></tr>
+<tr><td>3</td><td><code>npm run bench:ab -- --model sonnet --trials 4 [--tasks t4,t5]</code></td><td><code>bench/AB.md</code></td></tr>
+<tr><td>4</td><td><code>node bench/session-cost.ts &lt;dossiers…&gt; [--cold]</code></td><td>sortie console</td></tr>
+<tr><td>6</td><td><code>node bench/adoption.ts --dry</code> puis <code>--models sonnet,opus --trials 3 [--tasks t8] [--out nom] [--resume]</code></td><td><code>bench/ADOPTION*.md</code>, <code>*-raw.json</code></td></tr>
+<tr><td>Stats</td><td><code>node bench/adoption-stats.ts</code></td><td>console (moyenne, é.-t., p)</td></tr>
+</table>
+<h3>Coût des campagnes du banc 6</h3>
+<p>A1 : 11,40 $ (36 exécutions) · A2 : 1,93 $ (9) · A3 : 48,64 $ (18 valides) · sondes de diagnostic : ≈ 0,80 $. Montants en prix équivalent API.</p>
+<h3>Glossaire</h3>
+<p><b>Couverture</b> : part des appels de fichiers passant par token-eco. <b>Orchestrateur</b> : fil principal qui délègue. <b>Sous-agent</b> :
+agent lancé par l'orchestrateur, avec son propre contexte. <b>Hook</b> : script exécuté par Claude Code avant chaque appel d'outil.
+<b>Séparation complète</b> : toutes les valeurs d'un groupe sont inférieures à toutes celles de l'autre.</p>
+</body>
+</html>
