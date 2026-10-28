@@ -225,10 +225,27 @@ also applies to the native runs). 2026-10-27, v0.7.3, 3 trials per cell, 36/36 s
 | Opus | t7 feature | −1% / −3% | – | 90-100% | 3.0 (15 KB) → ≤ 2 (≤ 2 KB) |
 
 (Subagents ran on Sonnet in both cases, through `CLAUDE_CODE_SUBAGENT_MODEL`, as in real use.) Giving the reviewer
-`read`/`search` makes it use them; the producer uses them almost always; Bash file reads nearly disappear. But no
-measurable saving on these short tasks: the +22% on the Sonnet review is the same with or without the equipped
-reviewer, so it is the fixed cost of the eco agent prompt, guidance and tool schemas (~$0.04 per session) on a
-task of 3 subagent turns. A saving can only come from long sessions (repeated whole-file reads); not shown here.
+`read`/`search` makes it use them; the producer uses them almost always; Bash file reads nearly disappear. No
+measurable saving on these short tasks. The +22% on the Sonnet review was traced in the logs to the hook, not to a
+fixed cost: it refused the reviewer's read of a 454-line spec (~3.6K tokens) and pointed it to a tool it did not
+have, so the reviewer retried and read more. v0.7.4 only redirects files above 6,000 tokens too; re-run: −11% / +4%
+(noise).
+
+**Long task** (t8: review → fix → review again → implement → final review, 5 delegations, same spec and files
+needed again and again; v0.7.4, Sonnet, **8 trials per variant**, random variant order, exact permutation test).
+`eco-agent` is a control: the eco agent's discipline written for the built-in tools, no token-eco tools, no hook.
+
+| Variant | Mean cost ± sd | vs native | p (exact) | Subagent coverage | Bash file reads |
+|---|---|---|---|---|---|
+| native | $2.38 ± 0.60 | – | – | 0% | 15.6 |
+| eco-agent (agent only) | $1.98 ± 0.61 | −17% | 0.20 | 0% | 16.1 |
+| eco-before (plugin, reviewer without the tools) | $2.09 ± 0.62 | −12% | 0.36 | 26% | 8.3 |
+| **eco-after (plugin, reviewer with read/search)** | **$1.49 ± 0.51** | **−37%** | **0.008** | 74% | 5.4 |
+
+32/32 successes. With the subagents that read using the tools, the long session costs **37% less**, significant
+after Holm correction for the 3 comparisons; the main agent alone (−17%) or the plugin without adoption (−12%) do
+not explain it. With an Opus orchestrator (3 trials only): −21% to −31%, not significant. Full report, method and
+limits: [`docs/rapport-benchmarks.pdf`](docs/rapport-benchmarks.pdf) (French).
 
 **Lesson**: with a plugin like this one, adoption matters more than tool quality. Check the **Agent** column and the
 coverage cards before reading any saving.

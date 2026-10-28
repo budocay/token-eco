@@ -237,10 +237,27 @@ aussi aux runs natifs). 2026-10-27, v0.7.3, 3 essais par case, 36/36 réussites,
 
 (Les sous-agents tournaient sur Sonnet dans les deux cas, via `CLAUDE_CODE_SUBAGENT_MODEL`, comme en usage réel.)
 Donner `read`/`search` au relecteur le fait s'en servir ; le producteur s'en sert presque toujours ; les lectures via
-Bash disparaissent presque. Mais pas d'économie mesurable sur ces tâches courtes : le +22 % de la relecture Sonnet est
-le même avec ou sans relecteur équipé, c'est donc le coût fixe du prompt de l'agent eco, de la consigne et des schémas
-d'outils (~0,04 $ par session) sur une tâche de 3 tours de sous-agent. Une économie ne peut venir que des sessions
-longues (lectures complètes répétées) ; ce n'est pas démontré ici.
+Bash disparaissent presque. Pas d'économie mesurable sur ces tâches courtes. Le +22 % de la relecture Sonnet vient,
+d'après les logs, du hook et non d'un coût fixe : il refusait la lecture d'une spec de 454 lignes (~3,6K tokens) en
+renvoyant vers un outil que le relecteur n'avait pas, et celui-ci relançait puis lisait davantage. La v0.7.4 ne
+redirige plus que les fichiers de plus de 6 000 tokens ; nouveau run : −11 % / +4 % (bruit).
+
+**Tâche longue** (t8 : relecture → correction → nouvelle relecture → implémentation → relecture finale, 5 délégations,
+mêmes spec et fichiers sollicités plusieurs fois ; v0.7.4, Sonnet, **8 essais par variante**, ordre des variantes
+aléatoire, test de permutation exact). `eco-agent` est un contrôle : la discipline de l'agent eco écrite pour les
+outils natifs, sans outils token-eco ni hook.
+
+| Variante | Coût moyen ± é.-t. | vs natif | p (exact) | Couverture sous-agents | Lectures via Bash |
+|---|---|---|---|---|---|
+| native | 2,38 ± 0,60 $ | – | – | 0 % | 15,6 |
+| eco-agent (agent seul) | 1,98 ± 0,61 $ | −17 % | 0,20 | 0 % | 16,1 |
+| eco-before (plugin, relecteur sans les outils) | 2,09 ± 0,62 $ | −12 % | 0,36 | 26 % | 8,3 |
+| **eco-after (plugin, relecteur avec read/search)** | **1,49 ± 0,51 $** | **−37 %** | **0,008** | 74 % | 5,4 |
+
+32/32 réussites. Quand les sous-agents qui lisent utilisent les outils, la session longue coûte **37 % de moins**,
+résultat significatif après correction de Holm sur les 3 comparaisons ; l'agent principal seul (−17 %) ou le plugin
+sans adoption (−12 %) ne l'expliquent pas. Avec un orchestrateur Opus (3 essais seulement) : −21 % à −31 %, non
+significatif. Rapport complet, méthode et limites : [`docs/rapport-benchmarks.pdf`](docs/rapport-benchmarks.pdf).
 
 **Leçon** : avec un plugin comme celui-ci, l'adoption compte plus que la qualité des outils. Vérifie la colonne
 **Agent** et les cartes de couverture avant de lire la moindre économie.

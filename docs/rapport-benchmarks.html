@@ -133,10 +133,10 @@ td.n, th.n { text-align: right; white-space: nowrap; font-variant-numeric: tabul
     <span class="chip">Données : server/bench/</span>
   </div>
   <div class="kpis">
-    <div class="kpi"><div class="v">−48 %</div><div class="l">coût d'une tâche longue multi-agents (Sonnet, meilleure variante)</div></div>
+    <div class="kpi"><div class="v">−37 %</div><div class="l">coût d'une tâche longue multi-agents quand les sous-agents ont les outils (Sonnet, 8 essais, p = 0,008)</div></div>
     <div class="kpi"><div class="v">0 → 93 %</div><div class="l">part des lectures d'un relecteur passant par token-eco une fois équipé</div></div>
     <div class="kpi"><div class="v">4–24 %</div><div class="l">taille d'une lecture ciblée vs fichier entier, fidélité 92–100 %</div></div>
-    <div class="kpi"><div class="v">63 / 63</div><div class="l">exécutions réussies au banc d'adoption, aucune perte de qualité</div></div>
+    <div class="kpi"><div class="v">86 / 86</div><div class="l">exécutions réussies au banc d'adoption, aucune perte de qualité</div></div>
   </div>
 </header>
 <div class="content">
@@ -149,15 +149,16 @@ gros fichiers. <b>(1)</b> Hors ligne, les outils renvoient 4 à 24 % de la taill
 <b>(3)</b> Sur des sessions réelles scénarisées, aucune économie en dollars n'est démontrée avec Sonnet (−7 % à +22 % selon les runs) ;
 un run Opus donne −13 %. <b>(4)</b> En usage réel (30 jours), les outils n'étaient presque pas utilisés (4,7 % du fil principal, 1,2 %
 des sous-agents) : un autre plugin imposait son agent et des agents de projet n'y avaient pas accès. <b>(5)</b> Dans un banc
-multi-agents reproduisant cette situation (63 exécutions, toutes réussies), équiper le relecteur fait passer sa couverture de 0 % à
-39–93 % ; sur des tâches courtes le coût ne change pas de façon mesurable, tandis que sur une tâche longue les variantes token-eco
-coûtent <b>19 à 48 % de moins</b>, avec séparation complète des valeurs dans deux cas sur quatre (p = 0,10, minimum atteignable avec
-3 essais). Une partie de ce gain vient de l'agent principal (moins de tours d'orchestration). Aucun résultat n'atteint le seuil de
-5 % : ce sont des tendances cohérentes, pas des preuves.
+multi-agents reproduisant cette situation (86 exécutions, toutes réussies), équiper le relecteur fait passer sa couverture de 0 % à
+39–93 % ; sur des tâches courtes le coût ne change pas de façon mesurable. Sur une tâche longue (Sonnet, 8 essais par variante),
+token-eco avec des sous-agents équipés coûte <b>37 % de moins</b> que la référence (p = 0,008, test exact ; significatif après
+correction de Holm). Une variante de contrôle montre que l'agent principal seul, sans les outils, n'explique pas ce gain (−17 %,
+p = 0,20), pas plus que le plugin sans sous-agents équipés (−12 %, p = 0,36) : <b>le gain vient de l'usage des outils par les
+sous-agents qui lisent</b>. Avec Opus (3 essais), les variantes token-eco coûtent 21 à 31 % de moins, sans significativité.
 </div>
 <div class="facts">
   <div class="fact"><div class="v">6</div><div class="l">séries de mesures, de la qualité hors ligne à l'usage réel</div></div>
-  <div class="fact"><div class="v">≈ 62 $</div><div class="l">consommés par le banc d'adoption (prix équivalent API)</div></div>
+  <div class="fact"><div class="v">≈ 109 $</div><div class="l">consommés par le banc d'adoption (prix équivalent API)</div></div>
   <div class="fact"><div class="v">10</div><div class="l">conclusions, chacune avec son niveau de preuve</div></div>
 </div>
 
@@ -310,7 +311,9 @@ statistiques <code>server/bench/adoption-stats.ts</code>.</p>
     <code>tools:</code> ; un agent <code>producer</code> sans liste.</li>
   <li><b>Variantes :</b> <i>native</i> (plugin désactivé, référence) ; <i>eco-before</i> (plugin, agent eco, hook ; relecteur limité à
     <code>Read, Grep, Glob</code>, situation avant correction) ; <i>eco-after</i> (idem, relecteur doté en plus de token-eco
-    <code>read</code>/<code>search</code>).</li>
+    <code>read</code>/<code>search</code>) ; à partir de la campagne A4, <i>eco-agent</i> (contrôle : plugin désactivé comme native, mais
+    agent principal portant la même discipline que l'agent eco — tout regrouper en un tour, éditions groupées, pas de lecture via
+    Bash, concision — écrite pour les outils natifs ; sépare l'effet de l'agent de celui des outils).</li>
   <li><b>Tâches :</b> <i>t6</i> faire relire le code au regard d'une spécification et lister 3 écarts cachés (vérifié : les 3 constantes et
     valeurs citées) ; <i>t7</i> faire implémenter une exigence (vérifié : suite de tests + test caché) ; <i>t8, tâche longue</i> enchaîner
     5 délégations (relecture, correction des 3 écarts, nouvelle relecture, implémentation, relecture finale ; vérifié : 3 constantes
@@ -318,8 +321,9 @@ statistiques <code>server/bench/adoption-stats.ts</code>.</p>
   <li><b>Modèles :</b> orchestrateur Sonnet 5.5 ou Opus 5.5 ; les sous-agents ont tourné sur Sonnet 5.5 dans tous les cas, via le réglage
     <code>CLAUDE_CODE_SUBAGENT_MODEL</code> du compte, comme en usage réel.</li>
   <li><b>Contrôles :</b> exécution écartée si l'agent principal n'est pas celui attendu, si la référence utilise token-eco, ou en cas
-    d'erreur d'infrastructure (réseau, abonnement). Ordre fixe à chaque essai : native, eco-before, eco-after.</li>
-  <li><b>Exécutions :</b> 63 valides, <b>63 réussies</b> ; 5 écartées (perte de réseau, abonnement suspendu), relancées.</li>
+    d'erreur d'infrastructure (réseau, abonnement). Ordre des variantes fixe (native, eco-before, eco-after) dans A1–A3 ; tiré au
+    hasard à chaque essai dans A4 (graine 7).</li>
+  <li><b>Exécutions :</b> 86 valides, <b>86 réussies</b> ; 5 écartées (perte de réseau, abonnement suspendu), relancées.</li>
 </ul>
 
 <h3>9.2 Campagne A1 — tâches courtes, v0.7.3 (36 exécutions)</h3>
@@ -380,21 +384,22 @@ exécutions :</p>
 <h3>9.5 Campagne A3 — tâche longue t8, v0.7.4 (18 exécutions)</h3>
 <div class="chart">
   <div class="title">Coût d'une session, tâche longue t8</div>
-  <div class="hint">Barre = moyenne de 3 exécutions · trait = minimum–maximum · échelle 0 – 5,50 $</div>
-  <div class="group">Orchestrateur Sonnet</div>
-  <div class="row"><span>native</span><div class="track"><div class="fill native" style="width:45.1%"></div><div class="range" style="left:37.6%;width:12.0%"></div></div><span class="val">2,48 $ <small>[2,07–2,73]</small></span></div>
-  <div class="row"><span>eco-before</span><div class="track"><div class="fill" style="width:36.7%"></div><div class="range" style="left:23.3%;width:22.5%"></div></div><span class="val">2,02 $ <small>−19 %</small></span></div>
-  <div class="row"><span>eco-after</span><div class="track"><div class="fill" style="width:23.6%"></div><div class="range" style="left:18.2%;width:14.9%"></div></div><span class="val"><b>1,30 $</b> <small>−48 % · p = 0,10</small></span></div>
-  <div class="group">Orchestrateur Opus (sous-agents Sonnet)</div>
+  <div class="hint">Barre = moyenne · trait = minimum–maximum · échelle 0 – 5,50 $</div>
+  <div class="group">Orchestrateur Sonnet · 8 exécutions par variante (A3 + A4)</div>
+  <div class="row"><span>native</span><div class="track"><div class="fill native" style="width:43.3%"></div><div class="range" style="left:25.6%;width:37.3%"></div></div><span class="val">2,38 $ <small>[1,41–3,46]</small></span></div>
+  <div class="row"><span>eco-agent</span><div class="track"><div class="fill native" style="width:36.0%;background:linear-gradient(90deg,#a78bfa,#c4b5fd)"></div><div class="range" style="left:20.4%;width:34.2%"></div></div><span class="val">1,98 $ <small>−17 % · p = 0,20</small></span></div>
+  <div class="row"><span>eco-before</span><div class="track"><div class="fill" style="width:38.1%"></div><div class="range" style="left:20.4%;width:30.9%"></div></div><span class="val">2,09 $ <small>−12 % · p = 0,36</small></span></div>
+  <div class="row"><span>eco-after</span><div class="track"><div class="fill" style="width:27.2%"></div><div class="range" style="left:18.2%;width:25.3%"></div></div><span class="val"><b>1,49 $</b> <small><b>−37 % · p = 0,008</b></small></span></div>
+  <div class="group">Orchestrateur Opus (sous-agents Sonnet) · 3 exécutions par variante (A3)</div>
   <div class="row"><span>native</span><div class="track"><div class="fill native" style="width:76.5%"></div><div class="range" style="left:65.3%;width:30.2%"></div></div><span class="val">4,21 $ <small>[3,59–5,25]</small></span></div>
   <div class="row"><span>eco-before</span><div class="track"><div class="fill" style="width:52.5%"></div><div class="range" style="left:49.8%;width:7.6%"></div></div><span class="val"><b>2,89 $</b> <small>−31 % · p = 0,10</small></span></div>
   <div class="row"><span>eco-after</span><div class="track"><div class="fill" style="width:60.5%"></div><div class="range" style="left:47.8%;width:23.5%"></div></div><span class="val">3,33 $ <small>−21 %</small></span></div>
 </div>
 <div class="chart">
   <div class="title">Part des appels de fichiers des sous-agents passant par token-eco</div>
-  <div class="hint">Tâche longue t8, cumul des 3 exécutions par variante</div>
-  <div class="row"><span>Sonnet before</span><div class="track"><div class="fill cov" style="width:25%"></div></div><span class="val">25 %</span></div>
-  <div class="row"><span>Sonnet after</span><div class="track"><div class="fill cov" style="width:70%"></div></div><span class="val"><b>70 %</b></span></div>
+  <div class="hint">Tâche longue t8, cumul des exécutions par variante (Sonnet : 8 ; Opus : 3)</div>
+  <div class="row"><span>Sonnet before</span><div class="track"><div class="fill cov" style="width:26%"></div></div><span class="val">26 %</span></div>
+  <div class="row"><span>Sonnet after</span><div class="track"><div class="fill cov" style="width:74%"></div></div><span class="val"><b>74 %</b></span></div>
   <div class="row"><span>Opus before</span><div class="track"><div class="fill cov" style="width:25%"></div></div><span class="val">25 %</span></div>
   <div class="row"><span>Opus after</span><div class="track"><div class="fill cov" style="width:64%"></div></div><span class="val"><b>64 %</b></span></div>
   <div class="legend">Native : 0 % par construction. « after » = relecteur doté de token-eco <code>read</code>/<code>search</code>.</div>
@@ -410,13 +415,37 @@ exécutions :</p>
 </table>
 <p>18/18 réussies, 48,64 $. p = 0,10 signifie que les trois coûts de la variante sont tous inférieurs aux trois coûts de la référence.</p>
 <ul>
-  <li><b>Les quatre variantes token-eco coûtent moins que la référence</b> (−19 à −48 %) ; deux avec séparation complète.</li>
+  <li><b>Les quatre variantes token-eco coûtent moins que la référence</b> (−19 à −48 %) ; deux avec séparation complète. Sur 3 essais seulement : chiffres consolidés au §9.6.</li>
   <li><b>Effet de l'équipement du relecteur (eco-after contre eco-before) :</b> couverture des sous-agents 25 % → 64–70 % dans les deux cas ;
     coût −36 % avec Sonnet (p = 0,20) mais +15 % avec Opus (p = 0,40). Effet sur le coût non établi.</li>
-  <li><b>Facteur de confusion identifié :</b> le fil principal n'appelle aucun outil de fichier dans aucune variante (0 appel), mais fait
-    35 à 65 % de tours en moins sous l'agent eco (15,3 → 5,3–6,7 avec Sonnet ; 20,0 → 11,0–12,3 avec Opus). Une part du gain vient donc
-    des consignes de l'agent principal (regrouper, être concis), indépendamment des outils de fichiers. Avec Opus, où seul
-    l'orchestrateur est coûteux, cela peut expliquer que eco-before fasse aussi bien qu'eco-after.</li>
+  <li><b>Facteur de confusion possible :</b> le fil principal n'appelle aucun outil de fichier dans aucune variante (0 appel), mais fait
+    35 à 65 % de tours en moins sous l'agent eco. Le gain pouvait donc venir des consignes de l'agent principal plutôt que des outils.
+    La campagne A4 a été conçue pour trancher (§9.6).</li>
+</ul>
+
+<h3>9.6 Campagne A4 — consolidation Sonnet et variante de contrôle (23 exécutions)</h3>
+<p><b>Objectif :</b> confirmer l'effet sur la tâche longue avec assez d'essais pour un test à 5 %, et séparer l'effet de l'agent principal
+de celui des outils. <b>Protocole :</b> mêmes conditions que A3 (v0.7.4, Sonnet), essais 4 à 8 ajoutés aux 3 de A3 pour native,
+eco-before et eco-after, et 8 essais de la variante <i>eco-agent</i> ; ordre des variantes aléatoire à chaque essai. 32/32 réussies, 46,22 $.
+<b>Test :</b> permutation exacte sur les 12 870 partitions (8 contre 8) ; correction de Holm sur les 3 comparaisons à native.</p>
+<table>
+<tr><th>Variante</th><th class="n">Coût moyen ± é.-t. [min–max]</th><th class="n">vs native</th><th class="n">p exact</th><th class="n">Tours principal / sous-agents</th><th class="n">Couverture sous-agents</th><th class="n">Lectures via Bash</th></tr>
+<tr><td>native</td><td class="n">2,38 ± 0,60 [1,41–3,46]</td><td class="n">–</td><td class="n">–</td><td class="n">12,4 / 56,1</td><td class="n">0 %</td><td class="n">15,6 (106 Ko)</td></tr>
+<tr><td>eco-agent (agent seul)</td><td class="n">1,98 ± 0,61 [1,12–3,00]</td><td class="n">−17 %</td><td class="n">0,202</td><td class="n">8,9 / 44,6</td><td class="n">0 %</td><td class="n">16,1 (125 Ko)</td></tr>
+<tr><td>eco-before</td><td class="n">2,09 ± 0,62 [1,12–2,82]</td><td class="n">−12 %</td><td class="n">0,365</td><td class="n">7,9 / 48,4</td><td class="n">26 %</td><td class="n">8,3 (56 Ko)</td></tr>
+<tr><td><b>eco-after</b></td><td class="n"><b>1,49 ± 0,51 [1,00–2,39]</b></td><td class="n">−37 %</td><td class="n"><b>0,008</b></td><td class="n">6,4 / 35,4</td><td class="n">74 %</td><td class="n">5,4 (42 Ko)</td></tr>
+</table>
+<p class="small">Comparaisons entre variantes token-eco (permutation Monte-Carlo, 200 000 tirages) : eco-before contre eco-agent +6 %
+(p ≈ 0,71) ; eco-after contre eco-before −29 % (p ≈ 0,056) ; eco-after contre eco-agent −24 % (p ≈ 0,11).</p>
+<ul>
+  <li><b>Résultat principal :</b> token-eco avec des sous-agents équipés réduit le coût de la tâche longue de <b>37 %</b> (p = 0,008 ;
+    reste significatif après correction de Holm, seuil 0,017). 8 exécutions sur 8 restent sous 2,40 $ ; la référence va de 1,41 à 3,46 $.</li>
+  <li><b>L'agent principal seul n'explique pas le gain :</b> −17 %, non significatif, et il ne change pas les lectures via Bash des
+    sous-agents (16,1 contre 15,6) — ses consignes ne s'appliquent qu'au fil principal. L'hypothèse du §9.5 est donc infirmée.</li>
+  <li><b>Le plugin sans adoption ne rapporte presque rien :</b> eco-before (couverture 26 %) n'est pas meilleur que l'agent seul (+6 %).
+    Le gain apparaît quand les sous-agents qui lisent utilisent les outils (couverture 74 %), avec trois fois moins de lectures via Bash.</li>
+  <li><b>Estimation corrigée :</b> le −48 % de A3 (3 essais) surestimait l'effet ; avec 8 essais la référence descend de 2,48 à 2,38 $ et
+    eco-after remonte de 1,30 à 1,49 $. C'est la régression vers la moyenne attendue avec de petits échantillons.</li>
 </ul>
 
 <h2 id="s10" class="pb"><span class="num">10</span>Synthèse des conclusions et niveaux de preuve</h2>
@@ -428,21 +457,23 @@ exécutions :</p>
 <tr><td>4</td><td>Donner les outils à un agent à liste <code>tools:</code> restreinte fait passer sa couverture de 0 % à 39–93 %.</td><td><span class="lvl l1">Établi</span></td><td>Banc 6, toutes les cases</td></tr>
 <tr><td>5</td><td>Une redirection de lecture sur un fichier moyen (≈ 3,6 K tokens) coûte plus qu'elle n'économise ; le seuil en tokens (v0.7.4) supprime ce surcoût.</td><td><span class="lvl l2">Fort</span></td><td>9.3 (mécanisme dans les journaux), 9.4</td></tr>
 <tr><td>6</td><td>Sur des tâches multi-agents courtes, pas de différence de coût mesurable (−11 % à +4 % après correctif).</td><td><span class="lvl l2">Fort</span></td><td>A1 t7, A2</td></tr>
-<tr><td>7</td><td>Sur une tâche multi-agents longue, token-eco réduit le coût (−19 à −48 % selon le modèle et la variante).</td><td><span class="lvl l2">Fort</span> pour le sens, <span class="lvl l3">Indicatif</span> pour l'ampleur</td><td>A3 : 4/4 cases, 2 séparations complètes, n = 3</td></tr>
-<tr><td>8</td><td>Une part du gain vient de l'agent principal (moins de tours d'orchestration), pas seulement des outils de fichiers.</td><td><span class="lvl l2">Fort</span></td><td>A3 : tours du fil principal −35 à −65 %, 0 appel de fichier</td></tr>
-<tr><td>9</td><td>Équiper le relecteur réduit le coût total de la session.</td><td><span class="lvl l4">Non démontré</span></td><td>A3 : −36 % (Sonnet, p = 0,20), +15 % (Opus, p = 0,40)</td></tr>
-<tr><td>10</td><td>token-eco réduit la facture en usage réel.</td><td><span class="lvl l4">Non démontré</span></td><td>Banc 4 (Sonnet) ; usage réel à suivre</td></tr>
+<tr><td>7</td><td>Sur une tâche multi-agents longue (Sonnet), token-eco avec des sous-agents équipés réduit le coût d'environ 37 %.</td><td><span class="lvl l1">Établi</span> dans ce banc</td><td>A4 : 8 contre 8, p = 0,008, significatif après correction de Holm</td></tr>
+<tr><td>8</td><td>Ce gain vient de l'usage des outils par les sous-agents qui lisent, pas de l'agent principal seul.</td><td><span class="lvl l2">Fort</span></td><td>A4 : agent seul −17 % (p = 0,20) ; plugin sans adoption −12 % (p = 0,36), pas mieux que l'agent seul</td></tr>
+<tr><td>9</td><td>Équiper les sous-agents qui lisent réduit le coût par rapport au plugin seul.</td><td><span class="lvl l3">Indicatif</span></td><td>A4 : −29 % (p ≈ 0,06) ; Opus A3 : +15 % (n = 3)</td></tr>
+<tr><td>10</td><td>Avec un orchestrateur Opus, token-eco réduit aussi le coût de la tâche longue (−21 à −31 %).</td><td><span class="lvl l3">Indicatif</span></td><td>A3 : n = 3, p = 0,10 et 0,30</td></tr>
+<tr><td>11</td><td>token-eco réduit la facture en usage réel.</td><td><span class="lvl l4">Non démontré</span></td><td>Banc 4 (Sonnet) ; usage réel à suivre</td></tr>
 </table>
-<div class="box ok"><b>En une phrase :</b> les outils sont bons et, quand ils sont réellement utilisés dans une session longue, la session
-coûte moins cher ; sur des tâches courtes l'effet est nul ou de l'ordre de 10 %, et en usage réel il reste à démontrer — la condition
-première est l'adoption.</div>
+<div class="box ok"><b>En une phrase :</b> les outils sont fidèles, et quand les sous-agents qui lisent les utilisent vraiment, une
+session longue multi-agents coûte environ 37 % de moins (résultat significatif) ; sans cette adoption, le plugin ne rapporte presque
+rien ; sur des tâches courtes l'effet est nul ou de l'ordre de 10 % ; en usage réel, il reste à mesurer.</div>
 
 <h2 id="s11"><span class="num">11</span>Menaces à la validité</h2>
 <ul>
-  <li><b>Statistique :</b> 3 essais par case (4 au banc 3) ; p minimal de 0,10 ; 14 comparaisons sans correction ; coefficients de variation
-    de la référence de 14 à 21 % sur la tâche longue. Les ampleurs sont incertaines, seul le sens est cohérent.</li>
-  <li><b>Validité interne :</b> ordre des variantes fixe (native, eco-before, eco-after) et non aléatoire : un effet d'ordre ou d'heure
-    (charge de l'API, cache) n'est pas exclu ; variantes eco = plusieurs facteurs à la fois (agent, consigne, outils, hook) ;
+  <li><b>Statistique :</b> 3 essais par case dans A1–A3 (p minimal 0,10), 8 dans A4 (Sonnet, tâche longue) ; une seule comparaison
+    reste significative après correction (eco-after contre native, A4) ; coefficient de variation de la référence de 25 % sur la tâche
+    longue (Sonnet, n = 8) : les écarts de quelques % restent du bruit, et les résultats Opus reposent sur 3 essais.</li>
+  <li><b>Validité interne :</b> ordre des variantes fixe dans A1–A3 et dans les 3 premiers essais de A4, aléatoire ensuite : un effet
+    d'ordre ou d'heure (charge de l'API, cache) n'est pas entièrement exclu ; variantes eco = plusieurs facteurs à la fois (agent, consigne, outils, hook) ;
     jusqu'au 27/10, la référence pouvait hériter de l'agent du plugin installé (bancs 3 et 4 potentiellement concernés,
     non vérifiable a posteriori) ; une exécution écartée à la main (coupure réseau en cours d'exécution).</li>
   <li><b>Validité de construit :</b> coût = prix équivalent API calculé par Claude Code ; couverture = nombre d'appels, pas tokens ; détection
@@ -454,9 +485,9 @@ première est l'adoption.</div>
 
 <h2 id="s12"><span class="num">12</span>Recommandations</h2>
 <ul>
-  <li><b>Puissance :</b> pour confirmer un effet de −30 % avec la variance observée, viser au moins 8 essais par variante sur la tâche longue.</li>
-  <li><b>Ordre aléatoire</b> des variantes à chaque essai, et variante « agent eco seul, sans outils ni hook » pour séparer l'effet de l'agent
-    principal de celui des outils.</li>
+  <li><b>Opus :</b> porter la tâche longue à 8 essais par variante (≈ 80 $) pour vérifier que l'effet tient avec un orchestrateur Opus.</li>
+  <li><b>Effet propre du relecteur équipé :</b> à la limite du seuil (p ≈ 0,06) ; une douzaine d'essais par variante trancherait.</li>
+  <li><b>Tâches plus variées</b> que celles conçues par l'auteur du plugin, et sur un second projet, pour la validité externe.</li>
   <li><b>Suivi réel</b> sur deux semaines avec le tableau de bord (colonne Agent, couverture, coût par tour) après les corrections.</li>
   <li><b>Déploiement :</b> vérifier l'agent principal actif et donner <code>read</code>/<code>search</code> aux agents à liste
     <code>tools:</code> avant d'attendre une économie.</li>
@@ -471,10 +502,11 @@ première est l'adoption.</div>
 <tr><td>3</td><td><code>npm run bench:ab -- --model sonnet --trials 4 [--tasks t4,t5]</code></td><td><code>bench/AB.md</code></td></tr>
 <tr><td>4</td><td><code>node bench/session-cost.ts &lt;dossiers…&gt; [--cold]</code></td><td>sortie console</td></tr>
 <tr><td>6</td><td><code>node bench/adoption.ts --dry</code> puis <code>--models sonnet,opus --trials 3 [--tasks t8] [--out nom] [--resume]</code></td><td><code>bench/ADOPTION*.md</code>, <code>*-raw.json</code></td></tr>
+<tr><td>6 · A4</td><td><code>node bench/adoption.ts --resume --shuffle --seed 7 --tasks t8 --models sonnet --trials 8 --variants native,eco-agent,eco-before,eco-after --out adoption-long</code></td><td><code>bench/ADOPTION-LONG.md</code></td></tr>
 <tr><td>Stats</td><td><code>node bench/adoption-stats.ts</code></td><td>console (moyenne, é.-t., p)</td></tr>
 </table>
 <h3>Coût des campagnes du banc 6</h3>
-<p>A1 : 11,40 $ (36 exécutions) · A2 : 1,93 $ (9) · A3 : 48,64 $ (18 valides) · sondes de diagnostic : ≈ 0,80 $. Montants en prix équivalent API.</p>
+<p>A1 : 11,40 $ (36 exécutions) · A2 : 1,93 $ (9) · A3 : 48,64 $ (18 valides) · A4 : 46,22 $ (23) · sondes de diagnostic : ≈ 0,90 $ · total ≈ 109 $. Montants en prix équivalent API.</p>
 <h3>Glossaire</h3>
 <p><b>Couverture</b> : part des appels de fichiers passant par token-eco. <b>Orchestrateur</b> : fil principal qui délègue. <b>Sous-agent</b> :
 agent lancé par l'orchestrateur, avec son propre contexte. <b>Hook</b> : script exécuté par Claude Code avant chaque appel d'outil.
