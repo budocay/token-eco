@@ -44,7 +44,7 @@ for (const c of CAMPAIGNS) {
     const [model, task] = cell.split("|");
     const of = (v: string) => trials.filter((x) => x.model === model && x.task === task && x.variant === v);
     const native = of("native").map((x) => x.cost);
-    for (const v of ["native", "eco-before", "eco-after"]) {
+    for (const v of ["native", "eco-agent", "eco-before", "eco-after"]) {
       const xs = of(v);
       if (!xs.length) continue;
       const cost = xs.map((x) => x.cost), sum = (k: keyof Trial) => xs.reduce((s, x) => s + (x[k] as number), 0);

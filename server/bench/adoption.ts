@@ -31,12 +31,33 @@ const MODELS = arg("models", "sonnet,opus").split(",");
 const OUT = arg("out", "adoption"); const TRIALS = Number(arg("trials", "3")), BUDGET = arg("budget", "4"), MAX_TOTAL = Number(arg("max-total", "100"));
 const ECO_TOOLS = "mcp__plugin_token-eco_token-eco__read, mcp__plugin_token-eco_token-eco__search";
 
-interface Variant { id: string; plugin: boolean; reviewerEco: boolean }
+/** agentOnly: the eco agent's discipline (batch, concise, no file reads through Bash) written for the BUILT-IN
+ *  tools, without token-eco tools or hook: separates the effect of the main agent from the effect of the tools. */
+interface Variant { id: string; plugin: boolean; reviewerEco: boolean; agentOnly?: boolean }
 const VARIANTS: Variant[] = [
   { id: "native", plugin: false, reviewerEco: false },
+  { id: "eco-agent", plugin: false, reviewerEco: false, agentOnly: true },
   { id: "eco-before", plugin: true, reviewerEco: false },
   { id: "eco-after", plugin: true, reviewerEco: true },
-].filter((v) => { const w = arg("variants", "").split(",").filter(Boolean); return !w.length || w.includes(v.id); });
+]
+const ECO_PROMPT = ["---", "name: eco-prompt",
+  "description: Main agent with the token-eco discipline but only built-in tools (benchmark control variant).", "model: inherit",
+  "disallowedTools: NotebookEdit, CronCreate, CronDelete, CronList, DesignSync, EnterWorktree, ExitWorktree, PushNotification, RemoteTrigger, ReportFindings, ScheduleWakeup, SendMessage, Workflow, ListAgents",
+  "---", "",
+  "Each call costs a full turn, so before calling, list everything you need for the step and get it in ONE turn: several",
+  "Grep / Read calls in parallel in the same message (the file to change + its test file; Read with offset/limit for long",
+  "files). Then make all the edits of the step together (MultiEdit, or several Edit calls in one message; old_string copied",
+  "from text you have seen in this session, never from memory), and run the tests and `git diff --stat` in ONE Bash call.",
+  "Never read or search files through Bash (`cat`, `head`, `tail`, `sed -n`, `grep`, `rg`, `ls -R`): use Read / Grep. Be concise.", ""].join("\n");
+const expectedAgent = (v: Variant) => (v.plugin ? "token-eco:eco" : v.agentOnly ? "eco-prompt" : "");
+/** --shuffle: variant order drawn at random for each trial (seeded: --seed N), against order effects. */
+const SHUFFLE = process.argv.includes("--shuffle");
+let seed = Number(arg("seed", "42"));
+const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+const order = <T>(a: T[]) => { if (!SHUFFLE) return a; const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
+// Default = the 3 original variants (comparable with earlier campaigns); --variants picks any, e.g. eco-agent.
+const WANTED = arg("variants", "native,eco-before,eco-after").split(",").filter(Boolean);
+VARIANTS.splice(0, VARIANTS.length, ...VARIANTS.filter((v) => WANTED.includes(v.id)));
 
 // ---------- Long specs (generated: plausible requirements, the ones that matter buried in the middle) ----------
 const FILLER = ["Inputs are validated before any file is touched; an invalid input returns an error message, never throws.",
@@ -87,6 +108,7 @@ function fixture(folder: string, v: Variant): void {
   writeFileSync(join(folder, ".claude/agents/producer.md"), ["---", "name: producer",
     "description: Implements changes requested by the orchestrator, following the specs in docs/, and runs the tests.", "---", "",
     "Implement exactly what the brief and the spec ask, add or update tests, run `node --test test/` and report.", ""].join("\n"));
+  if (v.agentOnly) writeFileSync(join(folder, ".claude/agents/eco-prompt.md"), ECO_PROMPT);
 }
 
 // ---------- Tasks ----------
@@ -198,6 +220,7 @@ if (DRY) {
   for (const variant of VARIANTS) {
     const f = mkdtempSync(join(tmpdir(), "te-ad-dry-")); fixture(f, variant);
     ok(readFileSync(join(f, ".claude/agents/reviewer.md"), "utf8").includes(ECO_TOOLS) === variant.reviewerEco, `${variant.id}: reviewer tools ${variant.reviewerEco ? "with" : "without"} token-eco`);
+    ok(existsSync(join(f, ".claude/agents/eco-prompt.md")) === !!variant.agentOnly, `${variant.id}: main agent "${expectedAgent(variant) || "default"}"`);
     rmSync(f, { recursive: true, force: true });
   }
   const f = mkdtempSync(join(tmpdir(), "te-ad-dry-")); fixture(f, VARIANTS[VARIANTS.length - 1]);
@@ -229,7 +252,7 @@ const trials: Trial[] = REPORT_ONLY || RESUME ? JSON.parse(readFileSync(join(HER
 if (RESUME) trials.splice(0, trials.length, ...trials.filter((x) => !x.error));
 let spent = trials.reduce((a, x) => a + x.cost, 0), infra = 0;
 const done = (m: string, task: string, v: string) => trials.filter((x) => x.model === m && x.task === task && x.variant === v && !x.error).length;
-outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for (let n = 0; n < TRIALS; n++) for (const v of VARIANTS) {
+outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for (let n = 0; n < TRIALS; n++) for (const v of order(VARIANTS)) {
   if (RESUME && done(model, t.id, v.id) > n) continue;
   const folder = mkdtempSync(join(tmpdir(), "te-ad-"));
   fixture(folder, v); t.prepare(folder);
@@ -238,7 +261,8 @@ outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for
   // eco runs would load the plugin twice); eco runs load THIS checkout with --plugin-dir. Checked on 2026-10-27.
   const args = ["-p", t.prompt, "--model", model, "--output-format", "json", "--max-budget-usd", t.budget ?? BUDGET, "--dangerously-skip-permissions",
     "--settings", JSON.stringify({ enabledPlugins: { "token-eco@token-eco-marketplace": false } }),
-    ...(v.plugin ? ["--plugin-dir", PLUGIN, "--agent", "token-eco:eco"] : ["--disallowedTools", "mcp__plugin_token-eco_token-eco"])];
+    ...(v.plugin ? ["--plugin-dir", PLUGIN, "--agent", "token-eco:eco"] : ["--disallowedTools", "mcp__plugin_token-eco_token-eco"]),
+    ...(v.agentOnly ? ["--agent", "eco-prompt"] : [])];
   process.stdout.write(`${model} ${t.id} #${n + 1} ${v.id}… `);
   const r = spawnSync("claude", args, { cwd: folder, encoding: "utf8", maxBuffer: 1 << 28, timeout: 1_800_000, env: { ...process.env, TOKEN_ECO_HOME: home } });
   const row: Trial = { model, task: t.id, variant: v.id, ok: false, detail: "", cost: 0, turnsMain: 0, turnsSub: 0, agent: "", subModels: "",
@@ -258,8 +282,8 @@ outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for
     } else row.detail += " (log not found)";
     Object.assign(row, hookStats(home));
     // Guard: a plugin variant must really run as token-eco:eco; a native one must not use token-eco at all.
-    if (!row.error && v.plugin && row.agent !== "token-eco:eco") row.error = `main agent was "${row.agent || "none"}"`;
-    if (!row.error && !v.plugin && (row.mainEco + row.subEco > 0 || row.agent)) row.error = `native trial not sealed (agent "${row.agent}", ${row.mainEco + row.subEco} token-eco calls)`;
+    if (!row.error && row.agent !== expectedAgent(v)) row.error = `main agent was "${row.agent || "none"}", expected "${expectedAgent(v) || "none"}"`;
+    if (!row.error && !v.plugin && row.mainEco + row.subEco > 0) row.error = `${v.id} trial not sealed (${row.mainEco + row.subEco} token-eco calls)`;
   } catch (e) { row.error = (r.stderr || r.stdout || String(e)).slice(0, 200); }
   trials.push(row);
   spent += row.cost;
@@ -291,7 +315,7 @@ const excluded = trials.filter((x) => x.error);
 writeFileSync(join(HERE, `${OUT.toUpperCase()}.md`), [
   "# Adoption benchmark (multi-agent, headless Claude Code)", "",
   `${new Date().toISOString().slice(0, 10)} · ${TRIALS} trial(s) per cell · total spent $${spent.toFixed(2)} · fixture: server/ + 2 specs > 300 lines + orchestrator CLAUDE.md + reviewer/producer agents.`,
-  "native = token-eco sealed off (tools disallowed, hook off) · eco-before = plugin + token-eco:eco + hook, reviewer `tools: Read, Grep, Glob` · eco-after = same, reviewer also gets token-eco read/search.", "",
+  "native = token-eco sealed off (tools disallowed, hook off) · eco-agent = native + main agent with the eco discipline written for the built-in tools (separates agent from tools) · eco-before = plugin + token-eco:eco + hook, reviewer `tools: Read, Grep, Glob` · eco-after = same, reviewer also gets token-eco read/search.", "",
   "| Model | Task | Variant | Success | Cost | vs native | Turns main / sub | Coverage main | Coverage sub | Bash file reads (avg) | Hook redirects | Subagent model |",
   "|---|---|---|---|---|---|---|---|---|---|---|---|", ...lines, "",
   "Coverage = token-eco read/search/edit ÷ (those + built-in Read/Grep/Glob/Edit/MultiEdit), from the session logs. Cost = total_cost_usd (subagents included).",
