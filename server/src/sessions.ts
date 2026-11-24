@@ -58,10 +58,11 @@ export function emptyTotals(id = "", project = ""): SessionTotals {
     levers: { over200k: 0, over300k: 0, rebuilds: 0, rebuildCost: 0, subByModel: {}, startMain: 0, startSubs: [] } };
 }
 
-/** Adds one log file (main or subagent) to t. cold: the first main turn pays its prefix as a 1h cache write. */
-export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { cold?: boolean; model?: string } = {}): void {
+/** Adds one log file (main or subagent) to t. cold: the first main turn pays its prefix as a 1h cache write.
+ *  since (ms): turns before it are ignored, so a session resumed for months only counts its turns of the period. */
+export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { cold?: boolean; model?: string; since?: number } = {}): void {
   const seenMsg = new Set<string>(), seenTool = new Set<string>();
-  let prevReply = 0;
+  let prevReply = 0, skipped = false;
   for (const line of readFileSync(file, "utf8").split("\n")) {
     if (!line.trim()) continue;
     let o: any;
@@ -69,6 +70,7 @@ export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { c
     if (!isSub && o.cwd && !t.project) t.project = o.cwd;
     // Main-thread agent (settings "agent", set by a plugin or the user); the last one wins (it can change on resume).
     if (!isSub && typeof o.agentSetting === "string") t.agent = o.agentSetting;
+    if (opts.since && o.timestamp && Date.parse(o.timestamp) < opts.since) { skipped = true; continue; }
     if (o.timestamp) { if (!t.start || o.timestamp < t.start) t.start = o.timestamp; if (o.timestamp > t.end) t.end = o.timestamp; }
     const m = o.message;
     if (o.type !== "assistant" || !m) continue;
@@ -91,7 +93,7 @@ export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { c
     t.input += inp; t.write5m += w5m; t.write1h += w1h; t.cacheRead += read; t.output += out;
     t.tokens += inp + w5m + w1h + read + out;
     const ctx = inp + w5m + w1h + read, lv = t.levers, ts = o.timestamp ? Date.parse(o.timestamp) : 0;
-    if (seenMsg.size === 1) { if (isSub) lv.startSubs.push(ctx); else lv.startMain = ctx; }
+    if (seenMsg.size === 1 && !skipped) { if (isSub) lv.startSubs.push(ctx); else lv.startMain = ctx; }
     if (isSub) t.subagentTurns++; else { t.turns++; t.peakContext = Math.max(t.peakContext, ctx); t.model ||= m.model; }
     const gap = prevReply && ts ? ts - prevReply : 0;
     if (ts) prevReply = ts;
@@ -123,7 +125,7 @@ export function subagentLogs(mainLog: string): string[] {
 }
 
 /** One session (main log + its subagents). */
-export function sessionTotals(mainLog: string, opts: { cold?: boolean; model?: string } = {}): SessionTotals {
+export function sessionTotals(mainLog: string, opts: { cold?: boolean; model?: string; since?: number } = {}): SessionTotals {
   const t = emptyTotals(mainLog.split(/[\\/]/).pop()!.replace(/\.jsonl$/, ""));
   addLog(t, mainLog, false, opts);
   for (const f of subagentLogs(mainLog)) addLog(t, f, true, opts);
@@ -149,10 +151,10 @@ export function listSessions(scope: { project?: string; days?: number | null } =
       const path = join(dir, f);
       const st = statSync(path);
       if (st.mtimeMs < since) continue;
-      const key = `${st.mtimeMs}|${st.size}`;
+      const key = `${st.mtimeMs}|${st.size}|${scope.days ?? 0}`;
       let hit = cache.get(path);
       if (!hit || hit.key !== key) {
-        const t = sessionTotals(path);
+        const t = sessionTotals(path, { since });
         if (t.project) { t.workdir = t.project; t.project = projectRoot(t.project); }
         hit = { key, t }; cache.set(path, hit);
       }

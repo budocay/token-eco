@@ -448,7 +448,7 @@ function emptyTotals(id = "", project = "") {
 }
 function addLog(t, file, isSub, opts2 = {}) {
   const seenMsg = /* @__PURE__ */ new Set(), seenTool = /* @__PURE__ */ new Set();
-  let prevReply = 0;
+  let prevReply = 0, skipped = false;
   for (const line of readFileSync3(file, "utf8").split("\n")) {
     if (!line.trim()) continue;
     let o;
@@ -459,6 +459,10 @@ function addLog(t, file, isSub, opts2 = {}) {
     }
     if (!isSub && o.cwd && !t.project) t.project = o.cwd;
     if (!isSub && typeof o.agentSetting === "string") t.agent = o.agentSetting;
+    if (opts2.since && o.timestamp && Date.parse(o.timestamp) < opts2.since) {
+      skipped = true;
+      continue;
+    }
     if (o.timestamp) {
       if (!t.start || o.timestamp < t.start) t.start = o.timestamp;
       if (o.timestamp > t.end) t.end = o.timestamp;
@@ -491,7 +495,7 @@ function addLog(t, file, isSub, opts2 = {}) {
     t.output += out;
     t.tokens += inp + w5m + w1h + read2 + out;
     const ctx = inp + w5m + w1h + read2, lv = t.levers, ts = o.timestamp ? Date.parse(o.timestamp) : 0;
-    if (seenMsg.size === 1) {
+    if (seenMsg.size === 1 && !skipped) {
       if (isSub) lv.startSubs.push(ctx);
       else lv.startMain = ctx;
     }
@@ -567,10 +571,10 @@ function listSessions(scope = {}, root = projectsDir()) {
       const path = join4(dir, f);
       const st = statSync(path);
       if (st.mtimeMs < since) continue;
-      const key = `${st.mtimeMs}|${st.size}`;
+      const key = `${st.mtimeMs}|${st.size}|${scope.days ?? 0}`;
       let hit = cache2.get(path);
       if (!hit || hit.key !== key) {
-        const t = sessionTotals(path);
+        const t = sessionTotals(path, { since });
         if (t.project) {
           t.workdir = t.project;
           t.project = projectRoot(t.project);

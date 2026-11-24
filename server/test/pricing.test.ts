@@ -18,6 +18,22 @@ test("unlisted version: priced like the newest listed model of its family", () =
   assert.equal(priceFor("<synthetic>"), undefined);
 });
 
+test("sessions: a period only counts the turns inside it (session resumed for months)", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { listSessions, encodeProject } = await import("../src/sessions.ts");
+  const root = await mkdtemp(join(tmpdir(), "token-eco-since-")), proj = "/tmp/long-project", dir = join(root, encodeProject(proj));
+  await mkdir(dir, { recursive: true });
+  const usage = { input_tokens: 10, cache_read_input_tokens: 1000, cache_creation_input_tokens: 0, output_tokens: 50 };
+  const msg = (id: string, ts: string) => JSON.stringify({ type: "assistant", cwd: proj, timestamp: ts, message: { id, model: "claude-opus-5", usage, content: [] } });
+  const now = new Date().toISOString();
+  await writeFile(join(dir, "s.jsonl"), [msg("old1", "2020-01-01T10:00:00Z"), msg("old2", "2020-01-01T10:01:00Z"), msg("new1", now), msg("new2", now)].join("\n"));
+  assert.equal(listSessions({ project: proj, days: 30 }, root)[0].turns, 2);
+  assert.equal(listSessions({ project: proj }, root)[0].turns, 4);
+  await rm(root, { recursive: true, force: true });
+});
+
 test("Haiku 5.5: a request above 100K prompt tokens pays every price x5", () => {
   const base = PRICES["claude-haiku-5.5"];
   assert.equal(requestPrice("claude-haiku-5.5", 100_000), base);
