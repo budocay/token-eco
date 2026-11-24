@@ -1,12 +1,13 @@
 /**
  * SINGLE place where the project estimates tokens.
  *
- * Offline approximation: 1 token ≈ 4 characters (usual order of magnitude for
- * code and English; other languages and symbols often give a few more
- * tokens). Displayed figures are therefore ESTIMATES.
+ * Offline approximation, so displayed figures are ESTIMATES. Measured on 2026-11-24 with the tokenizer of the
+ * current models (Claude 4.7 and later; real input tokens of `claude -p`, Haiku 5.5): TypeScript 2.2-2.4
+ * characters per token, Markdown 2.4. 2.5 is kept so savings are not overstated. Until v0.7.4 this was 4
+ * (older tokenizer): rows recorded before v0.7.5 count about 40% fewer tokens for the same text.
  * To improve: replace the body of this function with a local tokenizer.
  */
-export const CHARS_PER_TOKEN = 4;
+export const CHARS_PER_TOKEN = 2.5;
 
 export function estimateTokens(input: string | number): number {
   const chars = typeof input === "number" ? input : input.length;

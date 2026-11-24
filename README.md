@@ -15,8 +15,8 @@ achieve). It brings:
 
 | Tool | What it does | "Native" reference used for the estimate |
 |---|---|---|
-| `read` | `name` → that symbol's code (doc, `template <…>`, overloads; definition preferred over prototype); `start`/`end` → range; `pattern` → matching lines of the file with context; nothing → whole file if short, else an outline; `targets` → up to 20 reads in one call (cap ≈ 10K tokens) | whole file / Read of the same range |
-| `search` | regex grouped by file, exact totals; `mode` `lines`/`files`/`count`; `symbols: true` → each hit labelled with its enclosing function/class (`› name L12-30`); `expand: true` → the whole enclosing function/class of each hit (≤ 150 lines each, ≈ 6K tokens per search): search + read in one call; `queries` → up to 10 searches in one call; no `pattern` + `glob` = file list | same lines in `grep -rn` format (+ Read of the expanded ranges) |
+| `read` | `name` → that symbol's code (doc, `template <…>`, overloads; definition preferred over prototype); `start`/`end` → range; `pattern` → matching lines of the file with context; nothing → whole file if short, else an outline; `targets` → up to 20 reads in one call (cap: 40K characters, ≈ 16K tokens) | whole file / Read of the same range |
+| `search` | regex grouped by file, exact totals; `mode` `lines`/`files`/`count`; `symbols: true` → each hit labelled with its enclosing function/class (`› name L12-30`); `expand: true` → the whole enclosing function/class of each hit (≤ 150 lines each, 24K characters ≈ 10K tokens per search): search + read in one call; `queries` → up to 10 searches in one call; no `pattern` + `glob` = file list | same lines in `grep -rn` format (+ Read of the expanded ranges) |
 | `edit` | N exact replacements (`old_string`/`new_string`/`replace_all`) in one call, all or nothing; when a text is not found, the error shows the closest passage (other indentation, matching line, shared words) to copy exactly | snippets returned by N native `Edit` calls |
 | `eco_report` | savings summary; `dashboard: true` starts the dashboard | – |
 
@@ -136,7 +136,10 @@ rejects foreign `Host` headers.
 - A tool result is written to the prompt cache once (5-minute write), then re-read from the cache on every later turn.
   So one saved token is worth `cacheWrite5m + laterTurns × cacheRead`. Default: Claude Sonnet 5.5, 10 later turns
   → $2.50 + 10 × $0.10 = **$3.50 per MTok saved**.
-- Tokens are estimated at 1 token ≈ 4 characters (`server/src/tokens.ts`, the single place to change).
+- Tokens are estimated at 1 token ≈ 2.5 characters (`server/src/tokens.ts`, the single place to change). Measured
+  with the tokenizer of the current models (Claude 4.7 and later): 2.2-2.4 characters per token on TypeScript, 2.4 on
+  Markdown. Until v0.7.4 the estimate was 4 characters: calls recorded before v0.7.5 count about 40% fewer tokens for
+  the same text, and the token figures of the benchmarks below that are not read from the logs use the old estimate.
 - Not counted: avoided round trips, nor the prior full read the native `Edit` requires.
 - Display: tokens as `950`, `12.3K`, `4.56M` (exact value on hover); dollars as `$1.23`, `<$0.01`.
 

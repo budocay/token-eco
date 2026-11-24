@@ -142,7 +142,8 @@ var init_config = __esm({
       excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
       laterTurns: 10,
       port: 4777,
-      hook: { mode: "redirect", lineThreshold: 300, minTokens: 6e3 },
+      // 9600 tokens × 2.5 chars = 24K characters: the size threshold validated by the adoption bench (was 6000 × 4).
+      hook: { mode: "redirect", lineThreshold: 300, minTokens: 9600 },
       lang: "auto"
     };
     AUTO_FILE = () => join(dataDir(), "auto-model.json");
@@ -409,7 +410,7 @@ var CHARS_PER_TOKEN;
 var init_tokens = __esm({
   "src/tokens.ts"() {
     "use strict";
-    CHARS_PER_TOKEN = 4;
+    CHARS_PER_TOKEN = 2.5;
   }
 });
 
@@ -530,7 +531,11 @@ function addLog(t, file, isSub, opts2 = {}) {
     };
     const c = k.input + k.write + k.read + k.output;
     t.cost += c;
-    if (isSub) t.costSub += c;
+    if (isSub) {
+      t.costSub += c;
+      const r = lv.subByModel[modelKey(m.model)];
+      r.cost = (r.cost ?? 0) + c;
+    }
     for (const key of ["input", "write", "read", "output"]) t.costKind[key] += k[key];
   }
 }
@@ -705,7 +710,7 @@ function levers(list, env = claudeEnv()) {
   const sum = (f) => list.reduce((a, s) => a + f(s), 0);
   const subModels = {};
   for (const s of list) for (const [k, r] of Object.entries(s.levers.subByModel)) {
-    const cost = priceRaw(r, k), cheap = priceRaw(r, CHEAP_SUB);
+    const cost = r.cost ?? priceRaw(r, k), cheap = priceRaw(r, CHEAP_SUB);
     subModels[k] ??= { turnsCost: 0, cheaper: 0 };
     subModels[k].turnsCost += cost;
     subModels[k].cheaper += Math.max(0, cost - cheap);

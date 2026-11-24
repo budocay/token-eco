@@ -49,7 +49,8 @@ var DEFAULT_CONFIG = {
   excludeProjects: ["/var/folders/", "/private/var/", "/tmp/", "/private/tmp/", "token-eco-trial"],
   laterTurns: 10,
   port: 4777,
-  hook: { mode: "redirect", lineThreshold: 300, minTokens: 6e3 },
+  // 9600 tokens × 2.5 chars = 24K characters: the size threshold validated by the adoption bench (was 6000 × 4).
+  hook: { mode: "redirect", lineThreshold: 300, minTokens: 9600 },
   lang: "auto"
 };
 function readConfig() {
@@ -1018,7 +1019,7 @@ async function outline(args, cwd) {
 }
 
 // src/tokens.ts
-var CHARS_PER_TOKEN = 4;
+var CHARS_PER_TOKEN = 2.5;
 function estimateTokens(input) {
   const chars = typeof input === "number" ? input : input.length;
   return Math.ceil(Math.max(0, chars) / CHARS_PER_TOKEN);

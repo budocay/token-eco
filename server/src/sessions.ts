@@ -22,7 +22,9 @@ export interface SessionTotals {
 }
 
 /** Usage tokens of a set of turns, kept raw so they can be re-priced with another model. */
-export interface RawTokens { input: number; write5m: number; write1h: number; read: number; output: number }
+export interface RawTokens { input: number; write5m: number; write1h: number; read: number; output: number;
+  /** Real cost of these turns, priced request by request (long-prompt tiers, family fallback). */
+  cost?: number }
 
 /** What the dashboard's "Levers" card needs (see insights.ts). */
 export interface Levers {
@@ -110,7 +112,7 @@ export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { c
       read: read * p.cacheRead / 1e6, output: out * p.output / 1e6 };
     const c = k.input + k.write + k.read + k.output;
     t.cost += c;
-    if (isSub) t.costSub += c;
+    if (isSub) { t.costSub += c; const r = lv.subByModel[modelKey(m.model)]; r.cost = (r.cost ?? 0) + c; }
     for (const key of ["input", "write", "read", "output"] as const) t.costKind[key] += k[key];
   }
 }

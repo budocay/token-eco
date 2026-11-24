@@ -121,7 +121,7 @@ export function levers(list: SessionTotals[], env = claudeEnv()) {
   const sum = (f: (s: SessionTotals) => number) => list.reduce((a, s) => a + f(s), 0);
   const subModels: Record<string, { turnsCost: number; cheaper: number }> = {};
   for (const s of list) for (const [k, r] of Object.entries(s.levers.subByModel)) {
-    const cost = priceRaw(r, k), cheap = priceRaw(r, CHEAP_SUB);
+    const cost = r.cost ?? priceRaw(r, k), cheap = priceRaw(r, CHEAP_SUB);
     subModels[k] ??= { turnsCost: 0, cheaper: 0 };
     subModels[k].turnsCost += cost;
     subModels[k].cheaper += Math.max(0, cost - cheap);

@@ -53,9 +53,9 @@ before(async () => {
 
 after(async () => { closeDb(); await rm(dir, { recursive: true, force: true }); });
 
-test("estimateTokens: chars/4 rounded up", () => {
+test("estimateTokens: chars/2.5 rounded up", () => {
   assert.equal(estimateTokens("abcde"), 2);
-  assert.equal(estimateTokens(8), 2);
+  assert.equal(estimateTokens(8), 4);
   assert.equal(estimateTokens(""), 0);
 });
 

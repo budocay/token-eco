@@ -15,8 +15,8 @@ obtient et n'obtient pas). Il apporte :
 
 | Outil | Ce qu'il fait | Référence « native » utilisée pour l'estimation |
 |---|---|---|
-| `read` | `name` → le code de ce symbole (doc, `template <…>`, surcharges ; définition préférée au prototype) ; `start`/`end` → plage ; `pattern` → lignes du fichier qui correspondent, avec contexte ; rien → fichier entier s'il est court, sinon un plan ; `targets` → jusqu'à 20 lectures en un appel (plafond ≈ 10K tokens) | fichier entier / Read de la même plage |
-| `search` | regex groupée par fichier, totaux exacts ; `mode` `lines`/`files`/`count` ; `symbols: true` → chaque résultat étiqueté avec sa fonction/classe englobante (`› name L12-30`) ; `expand: true` → toute la fonction/classe englobante de chaque résultat (≤ 150 lignes chacune, ≈ 6K tokens par recherche) : recherche + lecture en un appel ; `queries` → jusqu'à 10 recherches en un appel ; pas de `pattern` + `glob` = liste de fichiers | mêmes lignes au format `grep -rn` (+ Read des plages étendues) |
+| `read` | `name` → le code de ce symbole (doc, `template <…>`, surcharges ; définition préférée au prototype) ; `start`/`end` → plage ; `pattern` → lignes du fichier qui correspondent, avec contexte ; rien → fichier entier s'il est court, sinon un plan ; `targets` → jusqu'à 20 lectures en un appel (plafond : 40K caractères, ≈ 16K tokens) | fichier entier / Read de la même plage |
+| `search` | regex groupée par fichier, totaux exacts ; `mode` `lines`/`files`/`count` ; `symbols: true` → chaque résultat étiqueté avec sa fonction/classe englobante (`› name L12-30`) ; `expand: true` → toute la fonction/classe englobante de chaque résultat (≤ 150 lignes chacune, 24K caractères ≈ 10K tokens par recherche) : recherche + lecture en un appel ; `queries` → jusqu'à 10 recherches en un appel ; pas de `pattern` + `glob` = liste de fichiers | mêmes lignes au format `grep -rn` (+ Read des plages étendues) |
 | `edit` | N remplacements exacts (`old_string`/`new_string`/`replace_all`) en un appel, tout ou rien ; si un texte est introuvable, l'erreur montre le passage le plus proche (autre indentation, ligne correspondante, mots communs) à recopier tel quel | extraits renvoyés par N appels `Edit` natifs |
 | `eco_report` | résumé des économies ; `dashboard: true` lance le dashboard | – |
 
@@ -142,7 +142,11 @@ rejette les en-têtes `Host` étrangers.
 - Un résultat d'outil est écrit une fois dans le cache du prompt (écriture 5 minutes), puis relu depuis le cache à chaque
   tour suivant. Un token économisé vaut donc `cacheWrite5m + laterTurns × cacheRead`. Par défaut : Claude Sonnet 5.5,
   10 tours suivants → 2,50 $ + 10 × 0,10 $ = **3,50 $ par MTok économisé**.
-- Les tokens sont estimés à 1 token ≈ 4 caractères (`server/src/tokens.ts`, seul endroit à modifier).
+- Les tokens sont estimés à 1 token ≈ 2,5 caractères (`server/src/tokens.ts`, seul endroit à modifier). Mesuré avec
+  le tokenizer des modèles actuels (Claude 4.7 et suivants) : 2,2-2,4 caractères par token sur du TypeScript, 2,4 sur
+  du Markdown. Jusqu'à la v0.7.4 l'estimation était de 4 caractères : les appels enregistrés avant la v0.7.5 comptent
+  environ 40 % de tokens en moins pour le même texte, et les chiffres en tokens des bancs ci-dessous qui ne viennent
+  pas des logs utilisent l'ancienne estimation.
 - Non compté : les allers-retours évités, ni la lecture complète préalable qu'exige l'`Edit` natif.
 - Affichage : tokens en `950`, `12.3K`, `4.56M` (valeur exacte au survol) ; dollars en `$1.23`, `<$0.01` (en français
   dans le dashboard : `1,23 $`).

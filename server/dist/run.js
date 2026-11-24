@@ -230,7 +230,7 @@ function record(a, when = /* @__PURE__ */ new Date()) {
 }
 
 // src/tokens.ts
-var CHARS_PER_TOKEN = 4;
+var CHARS_PER_TOKEN = 2.5;
 function estimateTokens(input) {
   const chars = typeof input === "number" ? input : input.length;
   return Math.ceil(Math.max(0, chars) / CHARS_PER_TOKEN);
