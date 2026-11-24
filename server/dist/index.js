@@ -7816,6 +7816,7 @@ var insights_exports = {};
 __export(insights_exports, {
   agentShare: () => agentShare,
   breakdown: () => breakdown,
+  callWindows: () => callWindows,
   claudeEnv: () => claudeEnv,
   compare: () => compare,
   diagnose: () => diagnose,
@@ -7834,9 +7835,18 @@ function median(a) {
   const b = [...a].sort((x, y) => x - y), m = b.length >> 1;
   return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2;
 }
-function sessionRow(s, cfg, calls = callsInWindow) {
+function callWindows(list) {
+  const from = /* @__PURE__ */ new Map(), taken = /* @__PURE__ */ new Map();
+  for (const s of [...list].sort((a, b) => a.start.localeCompare(b.start))) {
+    const end = taken.get(s.project) ?? "";
+    from.set(s.id, end > s.start ? end : s.start);
+    if (s.end > end) taken.set(s.project, s.end);
+  }
+  return from;
+}
+function sessionRow(s, cfg, calls = callsInWindow, from = s.start) {
   const count = (prefix, names) => names.reduce((a, k) => a + (s.tools[prefix + k] ?? 0), 0);
-  const eco = calls(s.project, s.start, s.end);
+  const eco = from > s.end ? [] : calls(s.project, from, s.end);
   const key = modelKey(s.model);
   const rate = savedTokenRate(PRICES[key] ? key : "", cfg.laterTurns);
   const saved = eco.reduce((a, c) => a + c.saved, 0);
@@ -7969,7 +7979,8 @@ function insights(f = {}) {
   } catch {
   }
   const list = f.model ? real.filter((s) => modelKey(s.model) === f.model) : real;
-  const rows = list.map((s) => sessionRow(s, cfg));
+  const from = callWindows(list);
+  const rows = list.map((s) => sessionRow(s, cfg, callsInWindow, from.get(s.id)));
   const total = (pick2) => rows.reduce((a, r) => ({ eco: a.eco + pick2(r).eco, native: a.native + pick2(r).native }), { eco: 0, native: 0 });
   const main = total((r) => r.main), sub = total((r) => r.sub);
   const bash = rows.reduce((a, r) => ({ total: a.total + r.bash.total, compacted: a.compacted + r.bash.compacted }), { total: 0, compacted: 0 });
@@ -23985,7 +23996,7 @@ init_config();
 import { execFile } from "node:child_process";
 import { extname as extname2 } from "node:path";
 import { fileURLToPath } from "node:url";
-var server = new McpServer({ name: "token-eco", version: "0.7.6" });
+var server = new McpServer({ name: "token-eco", version: "0.7.7" });
 var ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 function adapter(name, tool) {
   return async (args) => {

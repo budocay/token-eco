@@ -37,10 +37,22 @@ export function median(a: number[]): number {
   return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2;
 }
 
-/** One session with its coverage and its token-eco calls (matched by project + time window). */
-export function sessionRow(s: SessionTotals, cfg: Config, calls = callsInWindow): SessionRow {
+/** Start of each session's call window: calls carry no session id, so sessions of one project that overlap in
+ *  time get disjoint windows (the earlier one keeps the overlap) and every call is counted once. */
+export function callWindows(list: Pick<SessionTotals, "id" | "project" | "start" | "end">[]): Map<string, string> {
+  const from = new Map<string, string>(), taken = new Map<string, string>();
+  for (const s of [...list].sort((a, b) => a.start.localeCompare(b.start))) {
+    const end = taken.get(s.project) ?? "";
+    from.set(s.id, end > s.start ? end : s.start);
+    if (s.end > end) taken.set(s.project, s.end);
+  }
+  return from;
+}
+
+/** One session with its coverage and its token-eco calls (matched by project + time window from..end). */
+export function sessionRow(s: SessionTotals, cfg: Config, calls = callsInWindow, from = s.start): SessionRow {
   const count = (prefix: string, names: string[]) => names.reduce((a, k) => a + (s.tools[prefix + k] ?? 0), 0);
-  const eco = calls(s.project, s.start, s.end);
+  const eco = from > s.end ? [] : calls(s.project, from, s.end);
   const key = modelKey(s.model);
   const rate = savedTokenRate(PRICES[key] ? key : "", cfg.laterTurns);
   const saved = eco.reduce((a, c) => a + c.saved, 0);
@@ -150,7 +162,8 @@ export function insights(f: Filters = {}) {
   const auto = dominantModel(real);
   if (auto) try { saveAutoModel(auto); } catch { /* read-only data dir */ }
   const list = f.model ? real.filter((s) => modelKey(s.model) === f.model) : real;
-  const rows = list.map((s) => sessionRow(s, cfg));
+  const from = callWindows(list);
+  const rows = list.map((s) => sessionRow(s, cfg, callsInWindow, from.get(s.id)));
   const total = (pick: (r: SessionRow) => Coverage): Coverage =>
     rows.reduce((a, r) => ({ eco: a.eco + pick(r).eco, native: a.native + pick(r).native }), { eco: 0, native: 0 });
   const main = total((r) => r.main), sub = total((r) => r.sub);

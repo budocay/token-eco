@@ -34,6 +34,20 @@ test("sessions: a period only counts the turns inside it (session resumed for mo
   await rm(root, { recursive: true, force: true });
 });
 
+test("insights: overlapping sessions of one project get disjoint call windows", async () => {
+  const { callWindows } = await import("../src/insights.ts");
+  const w = callWindows([
+    { id: "b", project: "/p", start: "2026-11-03T00:00:00Z", end: "2026-11-24T00:00:00Z" },
+    { id: "a", project: "/p", start: "2026-10-27T00:00:00Z", end: "2026-11-17T00:00:00Z" },
+    { id: "in", project: "/p", start: "2026-11-09T00:00:00Z", end: "2026-11-09T01:00:00Z" },
+    { id: "other", project: "/q", start: "2026-11-05T00:00:00Z", end: "2026-11-06T00:00:00Z" },
+  ]);
+  assert.equal(w.get("a"), "2026-10-27T00:00:00Z");
+  assert.equal(w.get("b"), "2026-11-17T00:00:00Z"); // the overlap stays with the earlier session
+  assert.ok(w.get("in")! > "2026-11-09T01:00:00Z"); // fully inside another one: empty window
+  assert.equal(w.get("other"), "2026-11-05T00:00:00Z");
+});
+
 test("Haiku 5.5: a request above 100K prompt tokens pays every price x5", () => {
   const base = PRICES["claude-haiku-5.5"];
   assert.equal(requestPrice("claude-haiku-5.5", 100_000), base);
