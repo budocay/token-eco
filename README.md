@@ -30,7 +30,8 @@ did not (see Benchmarks); the dollar cost was about the same because it wrote mo
 instead (it still gets the tools, the 5-line session guidance and the hook), remove the `"agent"` line from the
 plugin's `settings.json`. The `eco` agent has no built-in Read/Grep/Glob/Edit/NotebookEdit, and
 none of the rarely used automation/remote tools (Cron*, DesignSync, worktrees, PushNotification, RemoteTrigger,
-ReportFindings, ScheduleWakeup, SendMessage, Workflow, ListAgents). Measured: running as a custom agent costs ~5K extra
+ReportFindings, ScheduleWakeup, SendMessage, Workflow, ListAgents; since v0.7.5 also Artifact and SendFeedback, whose
+descriptions are several thousand tokens re-read every turn, not re-measured). Measured (before v0.7.5): running as a custom agent costs ~5K extra
 prompt tokens per session; with these removals the eco prefix is 39.3K tokens vs 40.0K for plain Claude Code (44.2K
 before). It keeps Task, Bash, Write, WebFetch, WebSearch, Monitor, TaskStop, Skill and ToolSearch. To get a removed tool
 back, delete it from `disallowedTools` in `agents/eco.md`. `alwaysLoad: true`: tools loaded upfront, no `ToolSearch` turn.
@@ -67,11 +68,27 @@ claude plugin install token-eco@token-eco-marketplace --scope user
 ```
 From a local clone instead: `/plugin marketplace add /path/to/token-eco`.
 
+**The MCP server is installed with the plugin**: there is no `claude mcp add` to run and nothing to put in your own
+`.mcp.json`. The plugin ships its `.mcp.json`, and Claude Code starts `server/dist/index.js` from the installed copy
+at every session (`alwaysLoad`: the 4 tools are there from the first turn). The hooks, agents and commands come the
+same way. Tools are named `mcp__plugin_token-eco_token-eco__read` / `search` / `edit` / `eco_report`.
+
+MCP server only, without the plugin (no hook, no agent, no command; the tools are then named
+`mcp__token-eco__*`, which the dashboard's coverage does not count):
+```
+git clone https://github.com/budocay/token-eco
+claude mcp add --scope user token-eco -- node /absolute/path/to/token-eco/server/dist/index.js
+```
+Do not do both: two copies of the server load the tool descriptions twice on every turn.
+
 **2. Restart Claude Code** (close every running session: a session keeps the plugins it started with, and a
 resumed one, `claude -c` / `--resume`, keeps its old main agent). Start a new one with `claude`.
 
 **3. Check** that it is really used:
-- `/mcp` → the `token-eco` server is connected;
+- `/mcp` → the `token-eco` server is connected (listed under the plugin). "Failed to connect": check `node -v`
+  (≥ 22.13) in the shell Claude Code starts from, then restart. A second, failed `token-eco` entry only appears
+  when Claude Code is opened inside a clone of this repository (its `.mcp.json` needs the plugin's path): disable it
+  there with `"disabledMcpjsonServers": ["token-eco"]` in `.claude/settings.local.json`;
 - `/eco-dashboard` → in **Sessions**, the **Agent** column shows `token-eco:eco` for the new sessions, and the
   ⚠ notes under "Real sessions" say what still bypasses the tools;
 - `/eco-stats` → the same in the terminal.
@@ -113,7 +130,9 @@ rejects foreign `Host` headers.
 
 ## Pricing and estimates
 
-- Prices: official Anthropic table in `server/src/pricing.ts` (USD per million tokens, MTok; checked 2026-10-22).
+- Prices: official Anthropic table in `server/src/pricing.ts` (USD per million tokens, MTok; checked 2026-11-24).
+  Fable 5.2 / 5 and Mythos are included; Haiku 5.5 requests above 100K prompt tokens are priced ×5; a model version
+  missing from the table is priced like the newest listed model of its family.
 - A tool result is written to the prompt cache once (5-minute write), then re-read from the cache on every later turn.
   So one saved token is worth `cacheWrite5m + laterTurns × cacheRead`. Default: Claude Sonnet 5.5, 10 later turns
   → $2.50 + 10 × $0.10 = **$3.50 per MTok saved**.

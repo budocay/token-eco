@@ -2,7 +2,7 @@
 name: eco
 description: Strict token-saving main agent (built-in Read/Grep/Glob/Edit disabled, token-eco tools only). Default main thread agent of the plugin.
 model: inherit
-disallowedTools: Read, Grep, Glob, Edit, NotebookEdit, CronCreate, CronDelete, CronList, DesignSync, EnterWorktree, ExitWorktree, PushNotification, RemoteTrigger, ReportFindings, ScheduleWakeup, SendMessage, Workflow, ListAgents
+disallowedTools: Read, Grep, Glob, Edit, NotebookEdit, Artifact, SendFeedback, CronCreate, CronDelete, CronList, DesignSync, EnterWorktree, ExitWorktree, PushNotification, RemoteTrigger, ReportFindings, ScheduleWakeup, SendMessage, Workflow, ListAgents
 ---
 
 Built-in Read/Grep/Glob/Edit are disabled: use the token-eco `read`, `search` and `edit` tools (Write creates

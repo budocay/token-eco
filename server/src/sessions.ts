@@ -8,7 +8,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { PRICES, type ModelPrice } from "./pricing.ts";
+import { requestPrice, type ModelPrice } from "./pricing.ts";
 import { projectRoot } from "./project.ts";
 
 export interface SessionTotals {
@@ -45,8 +45,8 @@ const ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
 /** Log model id → PRICES key: claude-opus-5-5 → claude-opus-5.5 (date suffix dropped). */
 export const modelKey = (model: string) => model.replace(/-\d{8}$/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2");
 
-export function priceFor(model: string, forced?: string): ModelPrice | undefined {
-  return PRICES[forced ?? modelKey(model)];
+export function priceFor(model: string, forced?: string, promptTokens = 0): ModelPrice | undefined {
+  return requestPrice(forced ?? modelKey(model), promptTokens);
 }
 
 export function emptyTotals(id = "", project = ""): SessionTotals {
@@ -93,7 +93,7 @@ export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { c
     if (isSub) t.subagentTurns++; else { t.turns++; t.peakContext = Math.max(t.peakContext, ctx); t.model ||= m.model; }
     const gap = prevReply && ts ? ts - prevReply : 0;
     if (ts) prevReply = ts;
-    const p = priceFor(m.model, opts.model);
+    const p = priceFor(m.model, opts.model, ctx);
     if (!p) { if (!t.unpriced.includes(m.model)) t.unpriced.push(m.model); continue; }
     if (!isSub) {
       lv.over200k += Math.max(0, Math.min(read, ctx - 200_000)) * p.cacheRead / 1e6;

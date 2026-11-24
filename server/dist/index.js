@@ -7254,6 +7254,17 @@ var require_dist = __commonJS({
 });
 
 // src/pricing.ts
+function priceKey(key) {
+  if (PRICES[key]) return key;
+  const family = /^claude-[a-z]+/.exec(key)?.[0];
+  return family ? Object.keys(PRICES).find((k) => k.startsWith(family + "-")) : void 0;
+}
+function requestPrice(key, promptTokens = 0) {
+  const k = priceKey(key);
+  if (!k) return void 0;
+  const p = PRICES[k], f = p.longPrompt && promptTokens > p.longPrompt.above ? p.longPrompt.factor : 1;
+  return f === 1 ? p : { ...p, input: p.input * f, cacheWrite5m: p.cacheWrite5m * f, cacheRead: p.cacheRead * f, output: p.output * f };
+}
 function savedTokenRate(model, laterTurns) {
   const p = PRICES[model] ?? PRICES[DEFAULT_MODEL];
   return p.cacheWrite5m + Math.max(0, laterTurns) * p.cacheRead;
@@ -7262,17 +7273,33 @@ var PRICES_CHECKED, PRICES_SOURCE, PRICES, DEFAULT_MODEL;
 var init_pricing = __esm({
   "src/pricing.ts"() {
     "use strict";
-    PRICES_CHECKED = "2026-10-22";
-    PRICES_SOURCE = "https://docs.claude.com/en/docs/about-claude/pricing";
+    PRICES_CHECKED = "2026-11-24";
+    PRICES_SOURCE = "https://platform.claude.com/docs/en/about-claude/pricing";
     PRICES = {
+      "claude-fable-5.2": { label: "Claude Fable 5.2", input: 8, cacheWrite5m: 10, cacheRead: 0.2, output: 40 },
       "claude-fable-5.1": { label: "Claude Fable 5.1", input: 10, cacheWrite5m: 12.5, cacheRead: 0.25, output: 50 },
+      "claude-fable-5": { label: "Claude Fable 5", input: 10, cacheWrite5m: 12.5, cacheRead: 1, output: 50 },
+      "claude-mythos-5.2": { label: "Claude Mythos 5.2", input: 8, cacheWrite5m: 10, cacheRead: 0.2, output: 40 },
+      "claude-mythos-5.1": { label: "Claude Mythos 5.1", input: 10, cacheWrite5m: 12.5, cacheRead: 0.25, output: 50 },
+      "claude-mythos-5": { label: "Claude Mythos 5", input: 10, cacheWrite5m: 12.5, cacheRead: 1, output: 50 },
       "claude-opus-5.5": { label: "Claude Opus 5.5", input: 4, cacheWrite5m: 5, cacheRead: 0.2, output: 20 },
       "claude-opus-5": { label: "Claude Opus 5", input: 5, cacheWrite5m: 6.25, cacheRead: 0.5, output: 25 },
       "claude-opus-4.8": { label: "Claude Opus 4.8", input: 5, cacheWrite5m: 6.25, cacheRead: 0.5, output: 25 },
+      "claude-opus-4.7": { label: "Claude Opus 4.7", input: 5, cacheWrite5m: 6.25, cacheRead: 0.5, output: 25 },
+      "claude-opus-4.6": { label: "Claude Opus 4.6", input: 5, cacheWrite5m: 6.25, cacheRead: 0.5, output: 25 },
+      "claude-opus-4.5": { label: "Claude Opus 4.5", input: 5, cacheWrite5m: 6.25, cacheRead: 0.5, output: 25 },
       "claude-sonnet-5.5": { label: "Claude Sonnet 5.5", input: 2, cacheWrite5m: 2.5, cacheRead: 0.1, output: 10 },
       "claude-sonnet-5": { label: "Claude Sonnet 5", input: 2, cacheWrite5m: 2.5, cacheRead: 0.2, output: 10 },
       "claude-sonnet-4.6": { label: "Claude Sonnet 4.6", input: 3, cacheWrite5m: 3.75, cacheRead: 0.3, output: 15 },
-      "claude-haiku-5.5": { label: "Claude Haiku 5.5 (\u2264100k prompt)", input: 0.1, cacheWrite5m: 0.125, cacheRead: 0.01, output: 0.5 },
+      "claude-sonnet-4.5": { label: "Claude Sonnet 4.5", input: 3, cacheWrite5m: 3.75, cacheRead: 0.3, output: 15 },
+      "claude-haiku-5.5": {
+        label: "Claude Haiku 5.5 (\u2264100k prompt)",
+        input: 0.1,
+        cacheWrite5m: 0.125,
+        cacheRead: 0.01,
+        output: 0.5,
+        longPrompt: { above: 1e5, factor: 5 }
+      },
       "claude-haiku-4.5": { label: "Claude Haiku 4.5", input: 1, cacheWrite5m: 1.25, cacheRead: 0.1, output: 5 }
     };
     DEFAULT_MODEL = "claude-sonnet-5.5";
@@ -7600,8 +7627,8 @@ var init_tokens = __esm({
 import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync3, statSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { join as join5, resolve as resolve3 } from "node:path";
-function priceFor(model, forced) {
-  return PRICES[forced ?? modelKey(model)];
+function priceFor(model, forced, promptTokens = 0) {
+  return requestPrice(forced ?? modelKey(model), promptTokens);
 }
 function emptyTotals(id = "", project = "") {
   return {
@@ -7685,7 +7712,7 @@ function addLog(t, file, isSub, opts = {}) {
     }
     const gap = prevReply && ts ? ts - prevReply : 0;
     if (ts) prevReply = ts;
-    const p = priceFor(m.model, opts.model);
+    const p = priceFor(m.model, opts.model, ctx);
     if (!p) {
       if (!t.unpriced.includes(m.model)) t.unpriced.push(m.model);
       continue;
@@ -23949,7 +23976,7 @@ init_config();
 import { execFile } from "node:child_process";
 import { extname as extname2 } from "node:path";
 import { fileURLToPath } from "node:url";
-var server = new McpServer({ name: "token-eco", version: "0.7.4" });
+var server = new McpServer({ name: "token-eco", version: "0.7.5" });
 var ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 function adapter(name, tool) {
   return async (args) => {

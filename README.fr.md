@@ -30,7 +30,8 @@ alors que le mode « outils seuls » non (voir Benchmarks) ; le coût en dollars
 plus. Pour garder ton agent habituel (il reçoit quand même les outils, la consigne de 5 lignes et le hook), retire la
 ligne `"agent"` du `settings.json` du plugin. L'agent `eco` n'a ni Read/Grep/Glob/Edit/NotebookEdit natifs, ni les outils
 d'automatisation/distants rarement utilisés (Cron*, DesignSync, worktrees, PushNotification, RemoteTrigger,
-ReportFindings, ScheduleWakeup, SendMessage, Workflow, ListAgents). Mesuré : tourner en agent personnalisé coûte ~5K
+ReportFindings, ScheduleWakeup, SendMessage, Workflow, ListAgents ; depuis la v0.7.5 aussi Artifact et SendFeedback,
+dont les descriptions font plusieurs milliers de tokens relus à chaque tour, non re-mesuré). Mesuré (avant la v0.7.5) : tourner en agent personnalisé coûte ~5K
 tokens de prompt en plus par session ; avec ces retraits, le préfixe d'eco fait 39,3K tokens contre 40,0K pour Claude Code
 seul (44,2K avant). Il garde Task, Bash, Write, WebFetch, WebSearch, Monitor, TaskStop, Skill et ToolSearch. Pour
 récupérer un outil retiré, supprime-le de `disallowedTools` dans `agents/eco.md`. `alwaysLoad: true` : outils chargés
@@ -69,11 +70,28 @@ claude plugin install token-eco@token-eco-marketplace --scope user
 ```
 Depuis un clone local : `/plugin marketplace add /chemin/vers/token-eco`.
 
+**Le serveur MCP s'installe avec le plugin** : aucun `claude mcp add` à lancer, rien à mettre dans ton propre
+`.mcp.json`. Le plugin embarque son `.mcp.json`, et Claude Code démarre `server/dist/index.js` depuis la copie
+installée à chaque session (`alwaysLoad` : les 4 outils sont là dès le premier tour). Les hooks, agents et commandes
+arrivent de la même façon. Les outils s'appellent `mcp__plugin_token-eco_token-eco__read` / `search` / `edit` /
+`eco_report`.
+
+Serveur MCP seul, sans le plugin (ni hook, ni agent, ni commande ; les outils s'appellent alors
+`mcp__token-eco__*`, que la couverture du dashboard ne compte pas) :
+```
+git clone https://github.com/budocay/token-eco
+claude mcp add --scope user token-eco -- node /chemin/absolu/vers/token-eco/server/dist/index.js
+```
+Ne pas faire les deux : deux copies du serveur chargent deux fois les descriptions d'outils à chaque tour.
+
 **2. Redémarrer Claude Code** (fermer toutes les sessions ouvertes : une session garde les plugins de son démarrage,
 et une session reprise, `claude -c` / `--resume`, garde son ancien agent principal). En lancer une nouvelle avec `claude`.
 
 **3. Vérifier** qu'il est vraiment utilisé :
-- `/mcp` → le serveur `token-eco` est connecté ;
+- `/mcp` → le serveur `token-eco` est connecté (listé sous le plugin). « Failed to connect » : vérifier `node -v`
+  (≥ 22.13) dans le shell d'où Claude Code est lancé, puis redémarrer. Une seconde entrée `token-eco` en échec
+  n'apparaît que si Claude Code est ouvert dans un clone de ce dépôt (son `.mcp.json` a besoin du chemin du plugin) :
+  la désactiver là avec `"disabledMcpjsonServers": ["token-eco"]` dans `.claude/settings.local.json` ;
 - `/eco-dashboard` → dans **Sessions**, la colonne **Agent** affiche `token-eco:eco` pour les nouvelles sessions, et
   les notes ⚠ sous « Sessions réelles » disent ce qui contourne encore les outils ;
 - `/eco-stats` → la même chose dans le terminal.
@@ -118,7 +136,9 @@ rejette les en-têtes `Host` étrangers.
 ## Tarifs et estimations
 
 - Prix : table officielle d'Anthropic dans `server/src/pricing.ts` (USD par million de tokens, MTok ; vérifiée le
-  2026-10-22).
+  2026-11-24). Fable 5.2 / 5 et Mythos sont inclus ; les requêtes Haiku 5.5 au-delà de 100K tokens de prompt sont
+  comptées ×5 ; une version de modèle absente de la table est comptée au prix du modèle listé le plus récent de sa
+  famille.
 - Un résultat d'outil est écrit une fois dans le cache du prompt (écriture 5 minutes), puis relu depuis le cache à chaque
   tour suivant. Un token économisé vaut donc `cacheWrite5m + laterTurns × cacheRead`. Par défaut : Claude Sonnet 5.5,
   10 tours suivants → 2,50 $ + 10 × 0,10 $ = **3,50 $ par MTok économisé**.
