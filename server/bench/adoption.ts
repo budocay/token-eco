@@ -11,7 +11,7 @@
  * (token-eco vs built-in file tools, main / subagents), file reads through Bash, hook redirects, main agent.
  *
  * Usage: node bench/adoption.ts [--dry | --report-only] [--models sonnet,opus] [--trials 3] [--tasks t6,t7]
- *          [--variants native,eco-before,eco-after] [--budget 4] [--max-total 100]
+ *          [--variants native,eco-before,eco-after] [--budget 4] [--max-total 100] [--sub-model claude-opus-5-5]
  * Output: bench/ADOPTION.md + bench/adoption-raw.json
  */
 import { spawnSync } from "node:child_process";
@@ -30,6 +30,9 @@ const DRY = process.argv.includes("--dry");
 const MODELS = arg("models", "sonnet,opus").split(",");
 const OUT = arg("out", "adoption"); const TRIALS = Number(arg("trials", "3")), BUDGET = arg("budget", "4"), MAX_TOTAL = Number(arg("max-total", "100"));
 const ECO_TOOLS = "mcp__plugin_token-eco_token-eco__read, mcp__plugin_token-eco_token-eco__search";
+/** --sub-model claude-opus-5-5: forces the model of every subagent (CLAUDE_CODE_SUBAGENT_MODEL through --settings),
+ *  to compare the same task with cheaper or dearer subagents. Default: the account's own setting. */
+const SUB_MODEL = arg("sub-model", "");
 
 /** agentOnly: the eco agent's discipline (batch, concise, no file reads through Bash) written for the BUILT-IN
  *  tools, without token-eco tools or hook: separates the effect of the main agent from the effect of the tools. */
@@ -98,7 +101,7 @@ function fixture(folder: string, v: Variant): void {
     "# Project rules", "",
     "You are the ORCHESTRATOR. You never read, search or edit project files yourself: you delegate.",
     "- Reviews and questions about the code → the `reviewer` agent (read-only).",
-    "- Any code change → the `producer` agent; it also runs the tests (`node --test test/`).",
+    "- Any code change → the `producer` agent; it also runs the tests (`node --test \"test/*.test.ts\"`).",
     "Give each agent a precise brief, then report its result to the user. Specs are in docs/.", ""].join("\n"));
   mkdirSync(join(folder, ".claude/agents"), { recursive: true });
   writeFileSync(join(folder, ".claude/agents/reviewer.md"), ["---", "name: reviewer",
@@ -107,7 +110,7 @@ function fixture(folder: string, v: Variant): void {
     "You review; you never change files. For each discrepancy: file, symbol, value in the code, value required by the spec, requirement id.", ""].join("\n"));
   writeFileSync(join(folder, ".claude/agents/producer.md"), ["---", "name: producer",
     "description: Implements changes requested by the orchestrator, following the specs in docs/, and runs the tests.", "---", "",
-    "Implement exactly what the brief and the spec ask, add or update tests, run `node --test test/` and report.", ""].join("\n"));
+    "Implement exactly what the brief and the spec ask, add or update tests, run `node --test \"test/*.test.ts\"` and report.", ""].join("\n"));
   if (v.agentOnly) writeFileSync(join(folder, ".claude/agents/eco-prompt.md"), ECO_PROMPT);
 }
 
@@ -143,7 +146,7 @@ const TASKS: Task[] = [
         `import { formatTokens } from "../src/stats.ts";`,
         `test("DISP-14 hidden", () => { assert.equal(formatTokens(2_500_000_000), "2.5B"); assert.equal(formatTokens(1_234_567_890), "1.23B");`,
         `  assert.equal(formatTokens(-3_000_000_000), "-3B"); assert.equal(formatTokens(999_000_000), "999M"); assert.equal(formatTokens(12_300), "12.3K"); });`].join("\n"));
-      const r = spawnSync("node", ["--test", "test/"], { cwd: f, encoding: "utf8", timeout: 180_000, env: { ...process.env, TOKEN_ECO_HOME: mkdtempSync(join(tmpdir(), "te-ad-verify-")) } });
+      const r = spawnSync("node", ["--test", "test/*.test.ts"], { cwd: f, encoding: "utf8", timeout: 180_000, env: { ...process.env, TOKEN_ECO_HOME: mkdtempSync(join(tmpdir(), "te-ad-verify-")) } });
       const fail = /(?:#|ℹ) fail (\d+)/.exec(r.stdout)?.[1] ?? "?";
       return { ok: r.status === 0, detail: r.status === 0 ? "suite + hidden test pass" : `${fail} failing test(s)` };
     },
@@ -232,7 +235,7 @@ if (DRY) {
     ["sed -n '1,40p' docs/SPEC-tools.md", "pass"], ["cat package.json", "pass"]] as const) {
     ok(decide(bash(c), cfg, {}, 0).action === want, `hook: \`${c}\` → ${want}`);
   }
-  const base = spawnSync("node", ["--test", "test/"], { cwd: f, encoding: "utf8", timeout: 180_000, env: { ...process.env, TOKEN_ECO_HOME: mkdtempSync(join(tmpdir(), "te-ad-dry-home-")) } });
+  const base = spawnSync("node", ["--test", "test/*.test.ts"], { cwd: f, encoding: "utf8", timeout: 180_000, env: { ...process.env, TOKEN_ECO_HOME: mkdtempSync(join(tmpdir(), "te-ad-dry-home-")) } });
   ok(base.status === 0, `fixture test suite passes as is (${/(?:#|ℹ) pass (\d+)/.exec(base.stdout)?.[1] ?? "?"} tests)`);
   ok(!TASKS[1].verify("", f).ok, "t7 check fails before the feature is implemented");
   const t6 = mkdtempSync(join(tmpdir(), "te-ad-dry-")); fixture(t6, VARIANTS[0]); TASKS[0].prepare(t6);
@@ -260,7 +263,7 @@ outer: for (const model of REPORT_ONLY ? [] : MODELS) for (const t of tasks) for
   // The copy installed on the account is always disabled (its "agent" setting would also apply to native runs, and
   // eco runs would load the plugin twice); eco runs load THIS checkout with --plugin-dir. Checked on 2026-10-27.
   const args = ["-p", t.prompt, "--model", model, "--output-format", "json", "--max-budget-usd", t.budget ?? BUDGET, "--dangerously-skip-permissions",
-    "--settings", JSON.stringify({ enabledPlugins: { "token-eco@token-eco-marketplace": false } }),
+    "--settings", JSON.stringify({ enabledPlugins: { "token-eco@token-eco-marketplace": false }, ...(SUB_MODEL ? { env: { CLAUDE_CODE_SUBAGENT_MODEL: SUB_MODEL } } : {}) }),
     ...(v.plugin ? ["--plugin-dir", PLUGIN, "--agent", "token-eco:eco"] : ["--disallowedTools", "mcp__plugin_token-eco_token-eco"]),
     ...(v.agentOnly ? ["--agent", "eco-prompt"] : [])];
   process.stdout.write(`${model} ${t.id} #${n + 1} ${v.id}… `);

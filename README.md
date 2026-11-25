@@ -166,6 +166,22 @@ Everything lives in `~/.token-eco/` (override with `TOKEN_ECO_HOME`):
 
 Reports are generated locally and not committed.
 
+**What was measured, version by version** (details in the sections below; every figure is reported as measured,
+including when the plugin does not help):
+
+| Version | Date | Change | Measure |
+|---|---|---|---|
+| 0.3 | 2026-10 | first tools + agent | A/B, 5 short tasks × 4, Sonnet: −8% cost |
+| 0.4.1 | 2026-10-22 | warmup in the A/B bench | A/B t4-t5 × 4: −10%; real 6-step session: +17%, then −7% |
+| 0.5.0-0.5.3 | 2026-10-22 | strict agent back as default | real session: 0% / −5% (strict), +22% / +6%; Opus: −1% / **−13%** |
+| 0.6.x | 2026-10-23/26 | real-session dashboard, levers, audit | real usage, 30 days: coverage 4.7% (main), 1.2% (subagents) |
+| 0.7.1-0.7.3 | 2026-10-27 | adoption diagnosis, `cat` redirect | adoption bench, 36/36: reviewer coverage 0% → 67%, cost within noise |
+| 0.7.4 | 2026-10-28 | redirect only above 6,000 tokens | long task, 8 trials: **−37%**, p = 0.008 |
+| 0.7.5 | 2026-11-24 | prices re-checked, token estimate | tokenizer: 2.2-2.4 chars per token (was assumed 4) |
+| 0.7.6 | 2026-11-24 | a period only counts its own turns | 30-day bill shown $6,290 → real $2,362 |
+| 0.7.7 | 2026-11-24 | calls counted once across overlapping sessions | "avoided" shown $88.50 → $62.10 (2.6% of the bill) |
+| 0.7.8 | 2026-11-25 | subagent models, optional cap | 55 of 283 launches forced a model; re-priced saving $354 / 30 days; long task with Sonnet vs Opus subagents: same success, $1.17 vs $3.88 |
+
 **Offline** (`cd server && npm run bench`, free → `server/bench/RESULTS.md`): tool output compared with the real syntax
 tree (TypeScript compiler, Python `ast`) on zod, ajv, the MCP SDK and the Python stdlib (~260 files, 2,600 symbols):
 
@@ -176,7 +192,8 @@ tree (TypeScript compiler, Python `ast`) on zod, ajv, the MCP SDK and the Python
 | read symbol: exact block / correct start | 92% / 99% | 100% / 100% | 100% / 100% |
 | read symbol: size vs native Read | 5% | 9% | 4% |
 
-`search` gives exactly the same results as `grep` (10 patterns out of 10) for about 47% of the `grep -rn` tokens.
+`search` gives exactly the same results as `grep` (10 patterns out of 10) for about 49% of the `grep -rn` tokens
+(re-run on 2026-11-25, v0.7.8: the table above within one point).
 Multi-language results (ctags ground truth): `node bench/languages.ts` → `server/bench/LANGUAGES.md`.
 
 **Real A/B** (`npm run bench:ab -- --model sonnet --trials 4 [--tasks t4,t5]`, paid, capped by `--budget`): runs the
@@ -240,6 +257,38 @@ plugin was removed and the reviewers got `read`/`search`: a frontend reviewer us
 calls (62 vs 50; 0% before) and the frontend producer for 21% (50 vs 191, mostly native `Edit`). One project, a few
 hours: to confirm over the next weeks with the same dashboard.
 
+**Real usage, one month later** (same logs, 30 days up to 2026-11-24, v0.7.7; 19 sessions, 8 projects):
+
+| | 2026-10-27 | 2026-11-24 |
+|---|---|---|
+| main conversation: token-eco share of file calls | 4.7% | **100%** (2,257 vs 0) |
+| subagents: token-eco share of file calls | 1.2% | **20%** (2,131 vs 8,762) |
+| Bash calls compacted | – | 15% (4,318 of 28,679) |
+| estimated savings / real bill | $3 / $4,283¹ (< 0.1%) | $62 / $2,366 (2.6%) |
+| subagents' share of the bill | 44% | 62% |
+
+¹ Computed before the v0.7.6 fix, which counted whole sessions resumed from earlier months: over-stated.
+
+The main conversation is covered; the bill is now mostly subagents, and "estimated savings" stays an estimate (assumed
+built-in output, extra turns not counted). What the same logs showed, and what was done about it:
+
+- **Two dashboard figures were wrong** and are fixed: the bill of a period (v0.7.6) and the avoided total, counted
+  twice when two sessions of a project overlapped (v0.7.7; the total now matches the database to the token).
+- **Project agents with a closed `tools:` list never called token-eco** (9 agents, 0 calls): `/eco-adopt`.
+- **Launches forcing a model**: 55 of 283 subagent launches in 10 days passed `model: "opus"`, which overrides both
+  the agent's `model:` and `CLAUDE_CODE_SUBAGENT_MODEL` (an agent declared `sonnet` ran 585 turns on Opus in a day).
+  Re-pricing the period's subagent tokens with the model each role suggests: $354 of $1,477. v0.7.8: `/eco-models`,
+  the guidance line and the optional cap. Checked with two `claude -p` trials: a launch asked on Opus ran on Sonnet.
+- **Reads through Bash are already targeted**: of 4,101 `sed` reads, 2,981 chain several ranges in one command and
+  only 49 return more than 20K characters (17 of 5,314 for `grep`). Redirecting them would return the same lines
+  and cost a turn: not done.
+- **Identical re-reads** (same call, nothing edited in between): 13% of the characters read (15.8M of 121.2M), but
+  12.9M come from the built-in `Read` of subagents and 1.2M from token-eco. A re-read cache in `read`: not done.
+- **1-hour prompt cache**: on the main thread, $358 of writes against an estimated $808 with the 5-minute cache
+  (rebuilds after idle gaps): keep it. For subagents, $571 against an estimated $500: no clear gain either way.
+- **Removing `Artifact` and `SendFeedback` from the eco agent** (v0.7.5): 33,208 prompt tokens with or without, in
+  `claude -p` (4 trials): no gain measured in that mode.
+
 **Adoption benchmark** (`npm run bench:adoption -- [--dry] [--models sonnet,opus] [--trials 3]`, paid except
 `--dry`; → `server/bench/ADOPTION.md`). A small multi-agent project like the real ones: an orchestrator `CLAUDE.md`
 that delegates, a read-only `reviewer` agent with a `tools:` list, a `producer` agent, two 454-line specs. Tasks:
@@ -276,6 +325,20 @@ needed again and again; v0.7.4, Sonnet, **8 trials per variant**, random variant
 after Holm correction for the 3 comparisons; the main agent alone (−17%) or the plugin without adoption (−12%) do
 not explain it. With an Opus orchestrator (3 trials only): −21% to −31%, not significant. Full report, method and
 limits: [`docs/rapport-benchmarks.pdf`](docs/rapport-benchmarks.pdf) (French).
+
+**Subagent model** (same long task t8, plugin on, Sonnet orchestrator, `--sub-model`; v0.7.8, 2026-11-25, 4 trials
+per side, $20.18 spent). Does the task need Opus subagents?
+
+| Subagents | Success | Mean cost ± sd | Subagent turns | Subagent coverage |
+|---|---|---|---|---|
+| Sonnet 5.5 | 4/4 | **$1.17 ± 0.32** | 27.5 | 72% |
+| Opus 5.5 | 4/4 | $3.88 ± 0.90 | 51.5 | 95% |
+
+Same success (3 constants fixed, test suite and hidden test passing) for 3.3 times the cost with Opus subagents:
+every Opus run cost more than every Sonnet run (exact permutation test, p = 0.029), and they also took more turns.
+Limits: one task that every variant has always passed, so it shows that Sonnet is enough here, not that it matches
+Opus on harder work (security review, architecture); the check is pass/fail, not a quality grade; the two sides ran
+one after the other, not interleaved; 4 trials.
 
 **Lesson**: with a plugin like this one, adoption matters more than tool quality. Check the **Agent** column and the
 coverage cards before reading any saving.

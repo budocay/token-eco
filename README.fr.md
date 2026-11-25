@@ -175,6 +175,22 @@ Tout est dans `~/.token-eco/` (modifiable avec `TOKEN_ECO_HOME`) :
 
 Les rapports sont générés en local et ne sont pas commités.
 
+**Ce qui a été mesuré, version par version** (détails dans les sections suivantes ; chaque chiffre est donné tel que
+mesuré, y compris quand le plugin n'aide pas) :
+
+| Version | Date | Changement | Mesure |
+|---|---|---|---|
+| 0.3 | 2026-10 | premiers outils + agent | A/B, 5 tâches courtes × 4, Sonnet : −8 % de coût |
+| 0.4.1 | 2026-10-22 | échauffement dans le banc A/B | A/B t4-t5 × 4 : −10 % ; session réelle en 6 étapes : +17 %, puis −7 % |
+| 0.5.0-0.5.3 | 2026-10-22 | agent strict de nouveau par défaut | session réelle : 0 % / −5 % (strict), +22 % / +6 % ; Opus : −1 % / **−13 %** |
+| 0.6.x | 2026-10-23/26 | dashboard des sessions réelles, leviers, audit | usage réel, 30 jours : couverture 4,7 % (principal), 1,2 % (sous-agents) |
+| 0.7.1-0.7.3 | 2026-10-27 | diagnostic d'adoption, redirection de `cat` | banc d'adoption, 36/36 : couverture du relecteur 0 % → 67 %, coût dans le bruit |
+| 0.7.4 | 2026-10-28 | redirection seulement au-dessus de 6 000 tokens | tâche longue, 8 essais : **−37 %**, p = 0,008 |
+| 0.7.5 | 2026-11-24 | prix revérifiés, estimation des tokens | tokenizer : 2,2 à 2,4 caractères par token (4 supposés avant) |
+| 0.7.6 | 2026-11-24 | une période ne compte que ses propres tours | facture 30 jours affichée 6 290 $ → réelle 2 362 $ |
+| 0.7.7 | 2026-11-24 | appels comptés une fois entre sessions qui se chevauchent | « évité » affiché 88,50 $ → 62,10 $ (2,6 % de la facture) |
+| 0.7.8 | 2026-11-25 | modèles des sous-agents, plafond optionnel | 55 lancements sur 283 forçaient un modèle ; économie re-chiffrée 354 $ / 30 jours ; tâche longue avec sous-agents Sonnet ou Opus : même réussite, 1,17 $ contre 3,88 $ |
+
 **Hors ligne** (`cd server && npm run bench`, gratuit → `server/bench/RESULTS.md`) : sortie des outils comparée au vrai
 arbre syntaxique (compilateur TypeScript, `ast` Python) sur zod, ajv, le SDK MCP et la stdlib Python (~260 fichiers,
 2 600 symboles) :
@@ -186,7 +202,8 @@ arbre syntaxique (compilateur TypeScript, `ast` Python) sur zod, ajv, le SDK MCP
 | lecture de symbole : bloc exact / bon début | 92 % / 99 % | 100 % / 100 % | 100 % / 100 % |
 | lecture de symbole : taille vs Read natif | 5 % | 9 % | 4 % |
 
-`search` donne exactement les mêmes résultats que `grep` (10 motifs sur 10) pour environ 47 % des tokens de `grep -rn`.
+`search` donne exactement les mêmes résultats que `grep` (10 motifs sur 10) pour environ 49 % des tokens de `grep -rn`
+(relancé le 2026-11-25, v0.7.8 : le tableau ci-dessus à un point près).
 Résultats multi-langages (vérité terrain ctags) : `node bench/languages.ts` → `server/bench/LANGUAGES.md`.
 
 **A/B réel** (`npm run bench:ab -- --model sonnet --trials 4 [--tasks t4,t5]`, payant, plafonné par `--budget`) : lance
@@ -254,6 +271,43 @@ relecteurs équipés de `read`/`search` : un relecteur frontend a utilisé token
 fichiers (62 contre 50 ; 0 % avant) et le producteur frontend pour 21 % (50 contre 191, surtout des `Edit` natifs).
 Un projet, quelques heures : à confirmer dans les semaines qui viennent avec le même dashboard.
 
+**Usage réel, un mois plus tard** (mêmes logs, 30 jours jusqu'au 2026-11-24, v0.7.7 ; 19 sessions, 8 projets) :
+
+| | 2026-10-27 | 2026-11-24 |
+|---|---|---|
+| conversation principale : part token-eco des appels sur les fichiers | 4,7 % | **100 %** (2 257 contre 0) |
+| sous-agents : part token-eco des appels sur les fichiers | 1,2 % | **20 %** (2 131 contre 8 762) |
+| appels Bash compactés | – | 15 % (4 318 sur 28 679) |
+| économies estimées / facture réelle | 3 $ / 4 283 $¹ (< 0,1 %) | 62 $ / 2 366 $ (2,6 %) |
+| part des sous-agents dans la facture | 44 % | 62 % |
+
+¹ Calculé avant le correctif v0.7.6, qui comptait en entier les sessions reprises des mois précédents : surestimé.
+
+La conversation principale est couverte ; la facture vient maintenant surtout des sous-agents, et les « économies
+estimées » restent une estimation (sortie native supposée, tours en plus non comptés). Ce que les mêmes logs ont
+montré, et ce qui a été fait :
+
+- **Deux chiffres du dashboard étaient faux** et sont corrigés : la facture d'une période (v0.7.6) et le total
+  évité, compté deux fois quand deux sessions d'un projet se chevauchaient (v0.7.7 ; le total recoupe maintenant la
+  base au token près).
+- **Les agents de projet à liste `tools:` fermée n'appelaient jamais token-eco** (9 agents, 0 appel) : `/eco-adopt`.
+- **Lancements qui forcent un modèle** : 55 lancements de sous-agents sur 283 en 10 jours passaient
+  `model: "opus"`, qui l'emporte sur le `model:` de l'agent et sur `CLAUDE_CODE_SUBAGENT_MODEL` (un agent déclaré
+  `sonnet` a fait 585 tours en Opus en une journée). En re-chiffrant les tokens des sous-agents de la période au
+  modèle que chaque rôle suggère : 354 $ sur 1 477 $. v0.7.8 : `/eco-models`, la ligne de consigne et le plafond
+  optionnel. Vérifié par deux essais `claude -p` : un lancement demandé en Opus a tourné en Sonnet.
+- **Les lectures via Bash sont déjà ciblées** : sur 4 101 lectures `sed`, 2 981 enchaînent plusieurs plages dans une
+  seule commande et 49 seulement renvoient plus de 20K caractères (17 sur 5 314 pour `grep`). Les rediriger
+  renverrait les mêmes lignes et coûterait un tour : non fait.
+- **Relectures identiques** (même appel, rien de modifié entre deux) : 13 % des caractères lus (15,8M sur 121,2M),
+  mais 12,9M viennent du `Read` natif des sous-agents et 1,2M de token-eco. Un cache de relectures dans `read` :
+  non fait.
+- **Cache de prompt 1 heure** : sur le fil principal, 358 $ d'écritures contre 808 $ estimés avec le cache 5 minutes
+  (reconstructions après les pauses) : à garder. Pour les sous-agents, 571 $ contre 500 $ estimés : pas de gain net
+  dans un sens ou dans l'autre.
+- **Retrait d'`Artifact` et `SendFeedback` de l'agent eco** (v0.7.5) : 33 208 tokens de prompt avec ou sans, en
+  `claude -p` (4 essais) : aucun gain mesuré dans ce mode.
+
 **Bench d'adoption** (`npm run bench:adoption -- [--dry] [--models sonnet,opus] [--trials 3]`, payant sauf `--dry` ;
 → `server/bench/ADOPTION.md`). Un petit projet multi-agents comme les vrais : un `CLAUDE.md` d'orchestrateur qui
 délègue, un agent `reviewer` en lecture seule avec une liste `tools:`, un agent `producer`, deux specs de 454 lignes.
@@ -291,6 +345,21 @@ outils natifs, sans outils token-eco ni hook.
 résultat significatif après correction de Holm sur les 3 comparaisons ; l'agent principal seul (−17 %) ou le plugin
 sans adoption (−12 %) ne l'expliquent pas. Avec un orchestrateur Opus (3 essais seulement) : −21 % à −31 %, non
 significatif. Rapport complet, méthode et limites : [`docs/rapport-benchmarks.pdf`](docs/rapport-benchmarks.pdf).
+
+**Modèle des sous-agents** (même tâche longue t8, plugin actif, orchestrateur Sonnet, `--sub-model` ; v0.7.8,
+2026-11-25, 4 essais de chaque côté, 20,18 $ dépensés). La tâche a-t-elle besoin de sous-agents en Opus ?
+
+| Sous-agents | Réussite | Coût moyen ± écart-type | Tours des sous-agents | Couverture des sous-agents |
+|---|---|---|---|---|
+| Sonnet 5.5 | 4/4 | **1,17 $ ± 0,32** | 27,5 | 72 % |
+| Opus 5.5 | 4/4 | 3,88 $ ± 0,90 | 51,5 | 95 % |
+
+Même réussite (3 constantes corrigées, suite de tests et test caché au vert) pour 3,3 fois le coût avec des
+sous-agents en Opus : chaque essai Opus a coûté plus cher que chaque essai Sonnet (test de permutation exact,
+p = 0,029), et ils ont aussi fait plus de tours. Limites : une seule tâche, que toutes les variantes ont toujours
+réussie, donc cela montre que Sonnet suffit ici, pas qu'il vaut Opus sur un travail plus dur (revue de sécurité,
+architecture) ; le contrôle est réussi/échoué, pas une note de qualité ; les deux séries ont tourné l'une après
+l'autre, pas en alterné ; 4 essais.
 
 **Leçon** : avec un plugin comme celui-ci, l'adoption compte plus que la qualité des outils. Vérifie la colonne
 **Agent** et les cartes de couverture avant de lire la moindre économie.
