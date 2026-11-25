@@ -52,6 +52,11 @@ d'emblée, pas de tour `ToolSearch`.
   10 minutes passe, donc un agent sans les outils token-eco n'est jamais bloqué.
 - `/eco-adopt [agent…]` : ajoute les outils token-eco et un court bloc de consignes à tes agents qui ont une liste
   `tools:` restreinte (demande confirmation, garde des copies `.bak`).
+- `/eco-models [agent…]` : montre sur quel modèle chaque type de sous-agent a réellement tourné (d'après les logs),
+  combien de fois son lancement portait un modèle explicite, et un modèle moins cher quand son rôle le permet (ni
+  édition ni Bash → Haiku, le reste → Sonnet), avec l'économie estimée. Demande avant de changer un `model:`. La
+  suggestion vient du rôle seulement : la qualité des réponses n'est pas mesurée. Le même tableau est dans le
+  dashboard.
 
 ## Installation
 
@@ -161,6 +166,10 @@ Tout est dans `~/.token-eco/` (modifiable avec `TOKEN_ECO_HOME`) :
 - `config.json` : `model` (une clé de `pricing.ts`, ex. `claude-opus-5.5`, ou `auto`), `laterTurns`, `port`,
   `excludeProjects`, `hook: { mode: "redirect" | "off", lineThreshold: 300 }`, `lang` (`auto` | `en` | `fr` : langue de
   `/eco-stats` et de la barre d'état ; `auto` suit `LANG`). Les anciennes clés sont migrées automatiquement.
+  `subagents: { maxExplicitModel: "" | "haiku" | "sonnet" | "opus" }` (défaut `""` = désactivé) : un `model`
+  explicite au lancement d'un sous-agent passe avant le `model:` de l'agent et avant `CLAUDE_CODE_SUBAGENT_MODEL` ;
+  avec un plafond, le hook retire tout modèle explicite au-dessus, et ces deux réglages s'appliquent de nouveau (un
+  agent déclaré `model: opus` reste en Opus). Retiré sans message : aussi quand tu as demandé ce modèle dans le chat.
 
 ## Benchmarks
 

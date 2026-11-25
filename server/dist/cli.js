@@ -24,7 +24,7 @@ function savedTokenRate(model, laterTurns) {
   const p = PRICES[model] ?? PRICES[DEFAULT_MODEL];
   return p.cacheWrite5m + Math.max(0, laterTurns) * p.cacheRead;
 }
-var PRICES_CHECKED, PRICES_SOURCE, PRICES, DEFAULT_MODEL;
+var PRICES_CHECKED, PRICES_SOURCE, PRICES, DEFAULT_MODEL, modelTier;
 var init_pricing = __esm({
   "src/pricing.ts"() {
     "use strict";
@@ -58,6 +58,7 @@ var init_pricing = __esm({
       "claude-haiku-4.5": { label: "Claude Haiku 4.5", input: 1, cacheWrite5m: 1.25, cacheRead: 0.1, output: 5 }
     };
     DEFAULT_MODEL = "claude-sonnet-5.5";
+    modelTier = (m) => [/haiku/i, /sonnet/i, /opus/i, /fable|mythos/i].findIndex((t) => t.test(m));
   }
 });
 
@@ -109,6 +110,7 @@ function readConfig() {
       laterTurns: Number.isFinite(c.laterTurns) ? c.laterTurns : DEFAULT_CONFIG.laterTurns,
       port: Number.isFinite(c.port) ? c.port : DEFAULT_CONFIG.port,
       hook,
+      subagents: { maxExplicitModel: ["haiku", "sonnet", "opus"].includes(c.subagents?.maxExplicitModel) ? c.subagents.maxExplicitModel : "" },
       lang: c.lang === "en" || c.lang === "fr" ? c.lang : "auto"
     };
     if (old) writeFileSync(f, JSON.stringify(cfg, null, 2) + "\n");
@@ -144,6 +146,7 @@ var init_config = __esm({
       port: 4777,
       // 9600 tokens × 2.5 chars = 24K characters: the size threshold validated by the adoption bench (was 6000 × 4).
       hook: { mode: "redirect", lineThreshold: 300, minTokens: 9600 },
+      subagents: { maxExplicitModel: "" },
       lang: "auto"
     };
     AUTO_FILE = () => join(dataDir(), "auto-model.json");
@@ -418,6 +421,13 @@ var init_tokens = __esm({
 import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync3, statSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { join as join4, resolve as resolve2 } from "node:path";
+function agentType(log) {
+  try {
+    return String(JSON.parse(readFileSync3(log.replace(/\.jsonl$/, ".meta.json"), "utf8")).agentType ?? "?");
+  } catch {
+    return "?";
+  }
+}
 function priceFor(model, forced, promptTokens = 0) {
   return requestPrice(forced ?? modelKey(model), promptTokens);
 }
@@ -443,11 +453,13 @@ function emptyTotals(id = "", project = "") {
     unpriced: [],
     costSub: 0,
     costKind: { input: 0, write: 0, read: 0, output: 0 },
-    levers: { over200k: 0, over300k: 0, rebuilds: 0, rebuildCost: 0, subByModel: {}, startMain: 0, startSubs: [] }
+    levers: { over200k: 0, over300k: 0, rebuilds: 0, rebuildCost: 0, subByModel: {}, startMain: 0, startSubs: [] },
+    agents: {}
   };
 }
 function addLog(t, file, isSub, opts2 = {}) {
   const seenMsg = /* @__PURE__ */ new Set(), seenTool = /* @__PURE__ */ new Set();
+  const use = () => agentUse(t, opts2.agent ?? "?");
   let prevReply = 0, skipped = false;
   for (const line of readFileSync3(file, "utf8").split("\n")) {
     if (!line.trim()) continue;
@@ -475,6 +487,12 @@ function addLog(t, file, isSub, opts2 = {}) {
         if (ECO_TOOL.test(c2.name)) t.ecoCalls++;
         const key = (isSub ? "sub:" : "") + String(c2.name).replace(ECO_TOOL, "eco:");
         t.tools[key] = (t.tools[key] ?? 0) + 1;
+        if ((c2.name === "Agent" || c2.name === "Task") && typeof c2.input?.model === "string") {
+          const a = agentUse(t, String(c2.input.subagent_type ?? "general-purpose"));
+          a.forced[c2.input.model] = (a.forced[c2.input.model] ?? 0) + 1;
+        }
+        if (isSub && (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(c2.name) || /__edit$/.test(c2.name))) use().edits++;
+        else if (isSub && c2.name === "Bash") use().bash++;
       }
     }
     const u = m.usage;
@@ -499,6 +517,7 @@ function addLog(t, file, isSub, opts2 = {}) {
       if (isSub) lv.startSubs.push(ctx);
       else lv.startMain = ctx;
     }
+    if (isSub && seenMsg.size === 1) use().launches++;
     if (isSub) t.subagentTurns++;
     else {
       t.turns++;
@@ -539,6 +558,15 @@ function addLog(t, file, isSub, opts2 = {}) {
       t.costSub += c;
       const r = lv.subByModel[modelKey(m.model)];
       r.cost = (r.cost ?? 0) + c;
+      const a = use(), x = a.byModel[modelKey(m.model)] ??= { input: 0, write5m: 0, write1h: 0, read: 0, output: 0, cost: 0 };
+      a.turns++;
+      a.cost += c;
+      x.input += inp;
+      x.write5m += w5m;
+      x.write1h += w1h;
+      x.read += read2;
+      x.output += out;
+      x.cost = (x.cost ?? 0) + c;
     }
     for (const key of ["input", "write", "read", "output"]) t.costKind[key] += k[key];
   }
@@ -550,7 +578,7 @@ function subagentLogs(mainLog) {
 function sessionTotals(mainLog, opts2 = {}) {
   const t = emptyTotals(mainLog.split(/[\\/]/).pop().replace(/\.jsonl$/, ""));
   addLog(t, mainLog, false, opts2);
-  for (const f of subagentLogs(mainLog)) addLog(t, f, true, opts2);
+  for (const f of subagentLogs(mainLog)) addLog(t, f, true, { ...opts2, agent: agentType(f) });
   return t;
 }
 function listSessions(scope = {}, root = projectsDir()) {
@@ -587,12 +615,13 @@ function listSessions(scope = {}, root = projectsDir()) {
   }
   return out.sort((a, b) => b.end.localeCompare(a.end));
 }
-var REBUILD_GAP_MS, projectsDir, ECO_TOOL, modelKey, cache2;
+var agentUse, REBUILD_GAP_MS, projectsDir, ECO_TOOL, modelKey, cache2;
 var init_sessions = __esm({
   "src/sessions.ts"() {
     "use strict";
     init_pricing();
     init_project();
+    agentUse = (t, type) => t.agents[type] ??= { launches: 0, turns: 0, cost: 0, edits: 0, bash: 0, byModel: {}, forced: {} };
     REBUILD_GAP_MS = 5 * 6e4;
     projectsDir = () => join4(process.env.CLAUDE_CONFIG_DIR ?? join4(homedir2(), ".claude"), "projects");
     ECO_TOOL = /^mcp__plugin_token-eco_token-eco__/;
@@ -604,6 +633,7 @@ var init_sessions = __esm({
 // src/insights.ts
 var insights_exports = {};
 __export(insights_exports, {
+  agentModels: () => agentModels,
   agentShare: () => agentShare,
   breakdown: () => breakdown,
   callWindows: () => callWindows,
@@ -615,6 +645,7 @@ __export(insights_exports, {
   isBench: () => isBench,
   levers: () => levers,
   median: () => median,
+  modelsText: () => modelsText,
   sessionRow: () => sessionRow
 });
 import { readFileSync as readFileSync4 } from "node:fs";
@@ -758,6 +789,67 @@ function levers(list, env = claudeEnv()) {
     }
   };
 }
+function agentModels(list) {
+  const by = {};
+  for (const s of list) for (const [k, a] of Object.entries(s.agents ?? {})) {
+    const b = by[k] ??= { launches: 0, turns: 0, cost: 0, edits: 0, bash: 0, byModel: {}, forced: {} };
+    b.launches += a.launches;
+    b.turns += a.turns;
+    b.cost += a.cost;
+    b.edits += a.edits;
+    b.bash += a.bash;
+    for (const [m, n] of Object.entries(a.forced)) b.forced[m] = (b.forced[m] ?? 0) + n;
+    for (const [m, r] of Object.entries(a.byModel)) {
+      const x = b.byModel[m] ??= { input: 0, write5m: 0, write1h: 0, read: 0, output: 0, cost: 0 };
+      x.input += r.input;
+      x.write5m += r.write5m;
+      x.write1h += r.write1h;
+      x.read += r.read;
+      x.output += r.output;
+      x.cost = (x.cost ?? 0) + (r.cost ?? 0);
+    }
+  }
+  return Object.entries(by).filter(([, a]) => a.turns > 0).map(([agent, a]) => {
+    const role = JUDGMENT.test(agent) ? "judgment" : a.edits === 0 && a.bash === 0 ? "read-only" : "work";
+    const target = ROLE_MODEL[role];
+    const saving = Object.entries(a.byModel).reduce((sum, [m, r]) => sum + (modelTier(m) > modelTier(target) ? Math.max(0, (r.cost ?? 0) - priceRaw(r, target)) : 0), 0);
+    return {
+      agent,
+      role,
+      launches: a.launches,
+      turns: a.turns,
+      cost: a.cost,
+      forced: a.forced,
+      models: Object.entries(a.byModel).map(([model, r]) => ({ model, cost: r.cost ?? 0 })).sort((x, y) => y.cost - x.cost),
+      suggested: saving >= 0.01 ? target : null,
+      saving
+    };
+  }).sort((x, y) => y.cost - x.cost);
+}
+function modelsText(days = 30) {
+  const rows = insights({ days }).agentModels, usd = (x) => `$${x.toFixed(2)}`, short = (m) => m.replace("claude-", "");
+  const cap = readConfig().subagents.maxExplicitModel || "off";
+  return [
+    `Subagents by type, last ${days} days, real sessions (${usd(rows.reduce((a, x) => a + x.cost, 0))}):`,
+    "agent | role | launches | turns | cost | ran on | explicit model at launch | suggested | saving",
+    ...rows.map((x) => [
+      x.agent,
+      x.role,
+      x.launches,
+      x.turns,
+      usd(x.cost),
+      x.models.map((m) => `${short(m.model)} ${usd(m.cost)}`).join(", "),
+      Object.entries(x.forced).map(([m, n]) => `${m} x${n}`).join(", ") || "-",
+      x.suggested ? short(x.suggested) : "-",
+      x.suggested ? usd(x.saving) : "-"
+    ].join(" | ")),
+    "",
+    `Total if every suggestion is applied: ${usd(rows.reduce((a, x) => a + (x.suggested ? x.saving : 0), 0))} (the period's tokens re-priced; Haiku long-prompt tier not applied).`,
+    "Roles: read-only = no edit and no Bash in the period (Haiku); judgment = security/review/architecture/audit by name (Sonnet suggested, keeping the current model is a valid choice); work = the rest (Sonnet).",
+    "Suggestions come from the role only: answer quality is NOT measured.",
+    `An explicit model in the launch call overrides the agent's own "model:" and CLAUDE_CODE_SUBAGENT_MODEL. Cap in ~/.token-eco/config.json: "subagents": { "maxExplicitModel": "sonnet" } drops any explicit model above it (now: ${cap}).`
+  ].join("\n");
+}
 function insights(f = {}) {
   const cfg = readConfig();
   const days = f.days && f.days > 0 ? Math.min(f.days, 365) : 30;
@@ -786,6 +878,7 @@ function insights(f = {}) {
     avoided: { tokens: rows.reduce((a, r) => a + r.avoidedTokens, 0), usd: avoidedUsd, shareOfCost: cost ? avoidedUsd / cost : 0 },
     breakdown: breakdown(list),
     levers: levers(list),
+    agentModels: agentModels(list),
     compare: compare(rows),
     agents: agentShare(rows),
     diagnosis: diagnose(rows, installedPlugin()),
@@ -820,7 +913,7 @@ function diagnose(rows, installed = () => true) {
   if (sub.native > 50 && sub.native > 4 * sub.eco) out.push({ code: "sub-native", ...sub });
   return out;
 }
-var ECO_FILE, NATIVE_FILE, isBench, pct, usesEco, CHEAP_SUB, priceRaw;
+var ECO_FILE, NATIVE_FILE, isBench, pct, usesEco, CHEAP_SUB, priceRaw, JUDGMENT, ROLE_MODEL;
 var init_insights = __esm({
   "src/insights.ts"() {
     "use strict";
@@ -839,6 +932,8 @@ var init_insights = __esm({
       const p = PRICES[key];
       return p ? (r.input * p.input + r.write5m * p.cacheWrite5m + r.write1h * 2 * p.input + r.read * p.cacheRead + r.output * p.output) / 1e6 : 0;
     };
+    JUDGMENT = /secur|review|architect|audit/i;
+    ROLE_MODEL = { "read-only": "claude-haiku-5.5", work: "claude-sonnet-5.5", judgment: "claude-sonnet-5.5" };
   }
 });
 
@@ -1191,6 +1286,9 @@ switch (cmd) {
     console.log(auditText2(measured));
     break;
   }
+  case "models":
+    console.log((await Promise.resolve().then(() => (init_insights(), insights_exports))).modelsText(Number(opts[0]) || 30));
+    break;
   case "statusline": {
     const { aggregate: aggregate2 } = await Promise.resolve().then(() => (init_db(), db_exports));
     const { toDollars: toDollars2, uiLang: uiLang2 } = await Promise.resolve().then(() => (init_config(), config_exports));
@@ -1224,6 +1322,6 @@ switch (cmd) {
     } else console.log("No server running.");
     break;
   default:
-    console.error("Usage: cli.js <stats | statusline | dashboard [--no-open] | serve | stop>");
+    console.error("Usage: cli.js <stats | audit | models [days] | statusline | dashboard [--no-open] | serve | stop>");
     process.exit(2);
 }

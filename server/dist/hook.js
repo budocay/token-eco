@@ -37,6 +37,7 @@ var PRICES = {
   "claude-haiku-4.5": { label: "Claude Haiku 4.5", input: 1, cacheWrite5m: 1.25, cacheRead: 0.1, output: 5 }
 };
 var DEFAULT_MODEL = "claude-sonnet-5.5";
+var modelTier = (m) => [/haiku/i, /sonnet/i, /opus/i, /fable|mythos/i].findIndex((t) => t.test(m));
 
 // src/config.ts
 function dataDir() {
@@ -51,6 +52,7 @@ var DEFAULT_CONFIG = {
   port: 4777,
   // 9600 tokens × 2.5 chars = 24K characters: the size threshold validated by the adoption bench (was 6000 × 4).
   hook: { mode: "redirect", lineThreshold: 300, minTokens: 9600 },
+  subagents: { maxExplicitModel: "" },
   lang: "auto"
 };
 function readConfig() {
@@ -74,6 +76,7 @@ function readConfig() {
       laterTurns: Number.isFinite(c.laterTurns) ? c.laterTurns : DEFAULT_CONFIG.laterTurns,
       port: Number.isFinite(c.port) ? c.port : DEFAULT_CONFIG.port,
       hook,
+      subagents: { maxExplicitModel: ["haiku", "sonnet", "opus"].includes(c.subagents?.maxExplicitModel) ? c.subagents.maxExplicitModel : "" },
       lang: c.lang === "en" || c.lang === "fr" ? c.lang : "auto"
     };
     if (old) writeFileSync(f, JSON.stringify(cfg, null, 2) + "\n");
@@ -1032,7 +1035,8 @@ var GUIDANCE = [
   "- one `read` with all `targets` (`name` = one symbol, `start`/`end`, `pattern` = matching lines; no option = whole file if short, else outline);",
   "- one `edit` with every change of a step, using only text you have seen in this session (read a doc file before editing it);",
   "- one Bash call chaining related commands (e.g. tests, then `git diff --stat`).",
-  "Prefer these tools to Read/Grep/Glob/Edit, and never read or search files with cat/head/tail/sed -n/grep/rg in Bash (not compacted, re-read every turn). Never re-read what you just read or wrote."
+  "Prefer these tools to Read/Grep/Glob/Edit, and never read or search files with cat/head/tail/sed -n/grep/rg in Bash (not compacted, re-read every turn). Never re-read what you just read or wrote.",
+  "Launching a subagent: do not pass `model` unless the user asked for that model (the agent's own model applies)."
 ].join("\n");
 function guidanceOutput(event = "SessionStart") {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: GUIDANCE } });
@@ -1167,6 +1171,10 @@ function decide(e, config, state, now = Date.now(), linesOf = countLines, rules 
   if (config.hook.mode === "off") return { action: "pass" };
   const ti = e.tool_input ?? {};
   let key, message, file;
+  if (e.tool_name === "Agent" || e.tool_name === "Task") {
+    const cap = config.subagents?.maxExplicitModel, m = typeof ti.model === "string" ? ti.model : "";
+    return cap && m && modelTier(m) > modelTier(cap) ? { action: "model", model: m } : { action: "pass" };
+  }
   const cats = e.tool_name === "Bash" && !ti.run_in_background ? catTargets(String(ti.command ?? ""), e.cwd) : null;
   if (cats) {
     let big = "", n = 0;
@@ -1301,6 +1309,12 @@ async function main() {
     const output = { hookEventName: "PreToolUse", updatedInput: { ...e.tool_input, command: d.command } };
     if (d.autoAllow) Object.assign(output, { permissionDecision: "allow", permissionDecisionReason: "token-eco: compact output" });
     process.stdout.write(JSON.stringify({ hookSpecificOutput: output }));
+    return;
+  }
+  if (d.action === "model") {
+    const input = { ...e.tool_input };
+    delete input.model;
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput: input } }));
     return;
   }
   if (d.action === "fallback") delete state[d.key];

@@ -13,7 +13,7 @@ import { execFile } from "node:child_process";
 import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const server = new McpServer({ name: "token-eco", version: "0.7.7" });
+const server = new McpServer({ name: "token-eco", version: "0.7.8" });
 
 /** Project root: CLAUDE_PROJECT_DIR when Claude Code provides it, else the cwd. */
 const ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
@@ -138,10 +138,13 @@ const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 server.registerTool(
   "eco_report",
   {
-    description: "token-eco savings summary; dashboard=true starts the local dashboard and returns its URL; audit=true lists what fills the starting context.",
-    inputSchema: { dashboard: z.boolean().optional(), audit: z.boolean().optional() },
+    description: "token-eco savings summary; dashboard=true starts the local dashboard and returns its URL; audit=true lists what fills the starting context; models=true: subagent models used and suggested.",
+    inputSchema: { dashboard: z.boolean().optional(), audit: z.boolean().optional(), models: z.boolean().optional() },
   },
   async (a) => {
+    if (a.models) {
+      try { return text((await import("./insights.ts")).modelsText()); } catch (e) { return { ...text(`eco_report: ${(e as Error).message}`), isError: true }; }
+    }
     if (a.audit) {
       try {
         const { auditText } = await import("./audit.ts");

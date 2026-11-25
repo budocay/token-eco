@@ -10,8 +10,9 @@ read its top section first when resuming work.
 
 - `.claude-plugin/` — `plugin.json`, `marketplace.json`. `.mcp.json` starts `server/dist/index.js`.
 - `settings.json` — `"agent": "token-eco:eco"` (makes the strict agent the default main agent).
-- `agents/`, `commands/` (`/eco-stats`, `/eco-dashboard`, `/eco-audit`, `/eco-statusline`, `/eco-adopt`),
-  `hooks/hooks.json` (SessionStart, SubagentStart, PreToolUse on `Read|Grep|Bash` → `server/dist/hook.js`).
+- `agents/`, `commands/` (`/eco-stats`, `/eco-dashboard`, `/eco-audit`, `/eco-statusline`, `/eco-adopt`,
+  `/eco-models`), `hooks/hooks.json` (SessionStart, SubagentStart, PreToolUse on `Read|Grep|Bash|Agent|Task` →
+  `server/dist/hook.js`).
 - `server/src/`
   - `index.ts` — MCP server, tool schemas and descriptions.
   - `tools/` — `read.ts` (dispatch), `outline.ts`, `readSymbol.ts`, `readRange.ts`, `searchCompact.ts`, `batchEdit.ts`.

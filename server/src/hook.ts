@@ -19,6 +19,7 @@ import { outline } from "./tools/outline.ts";
 import { nativeReadChars, splitLines } from "./types.ts";
 import { CHARS_PER_TOKEN, estimateTokens } from "./tokens.ts";
 import { guidanceOutput } from "./guidance.ts";
+import { modelTier } from "./pricing.ts";
 
 export interface HookInput {
   hook_event_name?: string;
@@ -33,7 +34,8 @@ export type Decision =
   | { action: "pass" }
   | { action: "fallback"; key: string }
   | { action: "refused"; key: string; message: string; file?: string }
-  | { action: "rewrite"; command: string; autoAllow: boolean };
+  | { action: "rewrite"; command: string; autoAllow: boolean }
+  | { action: "model"; model: string };
 export interface Rules { allow: string[]; deny: string[] }
 
 const DELAI_REPLI_MS = 10 * 60_000;
@@ -147,6 +149,13 @@ export function decide(e: HookInput, config: Config, state: State, now = Date.no
   if (config.hook.mode === "off") return { action: "pass" };
   const ti = e.tool_input ?? {};
   let key: string, message: string, file: string | undefined;
+
+  // Subagent launch with an explicit model above the user's cap: the model is dropped, so the agent's own
+  // `model:` or CLAUDE_CODE_SUBAGENT_MODEL applies again (an explicit model overrides both).
+  if (e.tool_name === "Agent" || e.tool_name === "Task") {
+    const cap = config.subagents?.maxExplicitModel, m = typeof ti.model === "string" ? ti.model : "";
+    return cap && m && modelTier(m) > modelTier(cap) ? { action: "model", model: m } : { action: "pass" };
+  }
 
   // `cat big-file` in Bash = a full Read in disguise (subagents do it a lot): same redirect, same retry state.
   // Also `cat -n f`, `cat a b c` and chains like `cd x && cat a && cat b` (measured: most subagent cats).
@@ -269,6 +278,13 @@ async function main(): Promise<void> {
     const output: Record<string, unknown> = { hookEventName: "PreToolUse", updatedInput: { ...e.tool_input, command: d.command } };
     if (d.autoAllow) Object.assign(output, { permissionDecision: "allow", permissionDecisionReason: "token-eco: compact output" });
     process.stdout.write(JSON.stringify({ hookSpecificOutput: output }));
+    return;
+  }
+
+  if (d.action === "model") {
+    const input = { ...e.tool_input };
+    delete input.model;
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput: input } }));
     return;
   }
 

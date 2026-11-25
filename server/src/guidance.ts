@@ -10,6 +10,7 @@ export const GUIDANCE = [
   "- one `edit` with every change of a step, using only text you have seen in this session (read a doc file before editing it);",
   "- one Bash call chaining related commands (e.g. tests, then `git diff --stat`).",
   "Prefer these tools to Read/Grep/Glob/Edit, and never read or search files with cat/head/tail/sed -n/grep/rg in Bash (not compacted, re-read every turn). Never re-read what you just read or wrote.",
+  "Launching a subagent: do not pass `model` unless the user asked for that model (the agent's own model applies).",
 ].join("\n");
 
 /** Same guidance for the main thread (SessionStart) and every subagent (SubagentStart): subagents

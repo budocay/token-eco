@@ -8,9 +8,9 @@
  */
 import { readConfig, saveAutoModel, type Config } from "./config.ts";
 import { callsInWindow } from "./db.ts";
-import { PRICES, savedTokenRate } from "./pricing.ts";
+import { modelTier, PRICES, savedTokenRate } from "./pricing.ts";
 import { shortName } from "./project.ts";
-import { listSessions, modelKey, type RawTokens, type SessionTotals } from "./sessions.ts";
+import { listSessions, modelKey, type AgentUse, type RawTokens, type SessionTotals } from "./sessions.ts";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -153,6 +153,51 @@ export function levers(list: SessionTotals[], env = claudeEnv()) {
   };
 }
 
+const JUDGMENT = /secur|review|architect|audit/i;
+const ROLE_MODEL = { "read-only": "claude-haiku-5.5", work: "claude-sonnet-5.5", judgment: "claude-sonnet-5.5" } as const;
+
+/** Per subagent type: what it really ran on, how often its launch forced a model, and the cheaper model its role
+ *  suggests (no edit and no Bash → Haiku; the rest → Sonnet). Role-based only: answer quality is not measured. */
+export function agentModels(list: SessionTotals[]) {
+  const by: Record<string, AgentUse> = {};
+  for (const s of list) for (const [k, a] of Object.entries(s.agents ?? {})) {
+    const b = (by[k] ??= { launches: 0, turns: 0, cost: 0, edits: 0, bash: 0, byModel: {}, forced: {} });
+    b.launches += a.launches; b.turns += a.turns; b.cost += a.cost; b.edits += a.edits; b.bash += a.bash;
+    for (const [m, n] of Object.entries(a.forced)) b.forced[m] = (b.forced[m] ?? 0) + n;
+    for (const [m, r] of Object.entries(a.byModel)) {
+      const x = (b.byModel[m] ??= { input: 0, write5m: 0, write1h: 0, read: 0, output: 0, cost: 0 });
+      x.input += r.input; x.write5m += r.write5m; x.write1h += r.write1h; x.read += r.read; x.output += r.output;
+      x.cost = (x.cost ?? 0) + (r.cost ?? 0);
+    }
+  }
+  return Object.entries(by).filter(([, a]) => a.turns > 0).map(([agent, a]) => {
+    const role = JUDGMENT.test(agent) ? "judgment" : a.edits === 0 && a.bash === 0 ? "read-only" : "work";
+    const target = ROLE_MODEL[role];
+    const saving = Object.entries(a.byModel).reduce((sum, [m, r]) =>
+      sum + (modelTier(m) > modelTier(target) ? Math.max(0, (r.cost ?? 0) - priceRaw(r, target)) : 0), 0);
+    return { agent, role, launches: a.launches, turns: a.turns, cost: a.cost, forced: a.forced,
+      models: Object.entries(a.byModel).map(([model, r]) => ({ model, cost: r.cost ?? 0 })).sort((x, y) => y.cost - x.cost),
+      suggested: saving >= 0.01 ? target : null, saving };
+  }).sort((x, y) => y.cost - x.cost);
+}
+
+/** /eco-models: the table above as text. English only: it is read by the agent, which then talks to the user. */
+export function modelsText(days = 30): string {
+  const rows = insights({ days }).agentModels, usd = (x: number) => `$${x.toFixed(2)}`, short = (m: string) => m.replace("claude-", "");
+  const cap = readConfig().subagents.maxExplicitModel || "off";
+  return [
+    `Subagents by type, last ${days} days, real sessions (${usd(rows.reduce((a, x) => a + x.cost, 0))}):`,
+    "agent | role | launches | turns | cost | ran on | explicit model at launch | suggested | saving",
+    ...rows.map((x) => [x.agent, x.role, x.launches, x.turns, usd(x.cost), x.models.map((m) => `${short(m.model)} ${usd(m.cost)}`).join(", "),
+      Object.entries(x.forced).map(([m, n]) => `${m} x${n}`).join(", ") || "-", x.suggested ? short(x.suggested) : "-", x.suggested ? usd(x.saving) : "-"].join(" | ")),
+    "",
+    `Total if every suggestion is applied: ${usd(rows.reduce((a, x) => a + (x.suggested ? x.saving : 0), 0))} (the period's tokens re-priced; Haiku long-prompt tier not applied).`,
+    "Roles: read-only = no edit and no Bash in the period (Haiku); judgment = security/review/architecture/audit by name (Sonnet suggested, keeping the current model is a valid choice); work = the rest (Sonnet).",
+    "Suggestions come from the role only: answer quality is NOT measured.",
+    `An explicit model in the launch call overrides the agent's own "model:" and CLAUDE_CODE_SUBAGENT_MODEL. Cap in ~/.token-eco/config.json: "subagents": { "maxExplicitModel": "sonnet" } drops any explicit model above it (now: ${cap}).`,
+  ].join("\n");
+}
+
 /** Everything the "Real sessions" part of the dashboard shows. */
 export function insights(f: Filters = {}) {
   const cfg = readConfig();
@@ -178,6 +223,7 @@ export function insights(f: Filters = {}) {
     avoided: { tokens: rows.reduce((a, r) => a + r.avoidedTokens, 0), usd: avoidedUsd, shareOfCost: cost ? avoidedUsd / cost : 0 },
     breakdown: breakdown(list),
     levers: levers(list),
+    agentModels: agentModels(list),
     compare: compare(rows),
     agents: agentShare(rows),
     diagnosis: diagnose(rows, installedPlugin()),

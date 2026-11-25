@@ -50,6 +50,10 @@ back, delete it from `disallowedTools` in `agents/eco.md`. `alwaysLoad: true`: t
   through, so an agent without the token-eco tools is never blocked.
 - `/eco-adopt [agent…]`: adds the token-eco tools and a short guidance block to your agents that have a restricted
   `tools:` list (asks for confirmation, keeps `.bak` copies).
+- `/eco-models [agent…]`: shows which model each subagent type really ran on (from the logs), how often its launch
+  carried an explicit model, and a cheaper model where its role allows (no edit and no Bash → Haiku, the rest →
+  Sonnet), with the estimated saving. It asks before changing any `model:`. The suggestion comes from the role only:
+  answer quality is not measured. The same table is in the dashboard.
 
 ## Install
 
@@ -153,6 +157,10 @@ Everything lives in `~/.token-eco/` (override with `TOKEN_ECO_HOME`):
 - `config.json`: `model` (a key of `pricing.ts`, e.g. `claude-opus-5.5`, or `auto`), `laterTurns`, `port`,
   `excludeProjects`, `hook: { mode: "redirect" | "off", lineThreshold: 300 }`, `lang` (`auto` | `en` | `fr`: language
   of `/eco-stats` and the status line; `auto` follows `LANG`). Older keys are migrated automatically.
+  `subagents: { maxExplicitModel: "" | "haiku" | "sonnet" | "opus" }` (default `""` = off): an explicit `model`
+  in a subagent launch overrides both the agent's own `model:` and `CLAUDE_CODE_SUBAGENT_MODEL`; with a cap, the
+  hook drops any explicit model above it, so those two settings apply again (an agent declared `model: opus` stays
+  on Opus). Dropped silently: also when you asked for that model in the chat.
 
 ## Benchmarks
 

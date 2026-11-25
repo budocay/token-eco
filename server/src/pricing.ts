@@ -42,6 +42,9 @@ export const DEFAULT_MODEL = "claude-sonnet-5.5";
 
 /** PRICES key for a model. A version missing from the table (released after it was checked) is priced like the
  *  newest listed model of its family, so its sessions are still counted instead of silently dropped. */
+/** Price tier of a model id or alias ("opus", "claude-sonnet-5.5"): 0 haiku, 1 sonnet, 2 opus, 3 fable/mythos; -1 unknown. */
+export const modelTier = (m: string) => [/haiku/i, /sonnet/i, /opus/i, /fable|mythos/i].findIndex((t) => t.test(m));
+
 export function priceKey(key: string): string | undefined {
   if (PRICES[key]) return key;
   const family = /^claude-[a-z]+/.exec(key)?.[0];

@@ -42,6 +42,10 @@ switch (cmd) {
     break;
   }
 
+  case "models":
+    console.log((await import("./insights.ts")).modelsText(Number(opts[0]) || 30));
+    break;
+
   case "statusline": {
     // Claude Code status line (stdin = session info, ignored): one short line.
     const { aggregate } = await import("./db.ts");
@@ -79,6 +83,6 @@ switch (cmd) {
     break;
 
   default:
-    console.error("Usage: cli.js <stats | statusline | dashboard [--no-open] | serve | stop>");
+    console.error("Usage: cli.js <stats | audit | models [days] | statusline | dashboard [--no-open] | serve | stop>");
     process.exit(2);
 }

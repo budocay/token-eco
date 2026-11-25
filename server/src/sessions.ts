@@ -19,6 +19,21 @@ export interface SessionTotals {
   /** Cost split: subagents vs main thread, and by token kind (what drives the bill). */
   costSub: number; costKind: { input: number; write: number; read: number; output: number };
   levers: Levers;
+  /** Subagent usage by agent type (from each subagent log's .meta.json). */
+  agents: Record<string, AgentUse>;
+}
+
+/** One subagent type: what it ran on, what it did, and how often its launch carried an explicit `model`. */
+export interface AgentUse {
+  launches: number; turns: number; cost: number; edits: number; bash: number;
+  byModel: Record<string, RawTokens>; forced: Record<string, number>;
+}
+
+const agentUse = (t: SessionTotals, type: string): AgentUse =>
+  (t.agents[type] ??= { launches: 0, turns: 0, cost: 0, edits: 0, bash: 0, byModel: {}, forced: {} });
+
+function agentType(log: string): string {
+  try { return String(JSON.parse(readFileSync(log.replace(/\.jsonl$/, ".meta.json"), "utf8")).agentType ?? "?"); } catch { return "?"; }
 }
 
 /** Usage tokens of a set of turns, kept raw so they can be re-priced with another model. */
@@ -55,13 +70,14 @@ export function emptyTotals(id = "", project = ""): SessionTotals {
   return { id, project, start: "", end: "", model: "", turns: 0, subagentTurns: 0, input: 0, write5m: 0, write1h: 0,
     cacheRead: 0, output: 0, tokens: 0, cost: 0, peakContext: 0, ecoCalls: 0, tools: {}, unpriced: [],
     costSub: 0, costKind: { input: 0, write: 0, read: 0, output: 0 },
-    levers: { over200k: 0, over300k: 0, rebuilds: 0, rebuildCost: 0, subByModel: {}, startMain: 0, startSubs: [] } };
+    levers: { over200k: 0, over300k: 0, rebuilds: 0, rebuildCost: 0, subByModel: {}, startMain: 0, startSubs: [] }, agents: {} };
 }
 
 /** Adds one log file (main or subagent) to t. cold: the first main turn pays its prefix as a 1h cache write.
  *  since (ms): turns before it are ignored, so a session resumed for months only counts its turns of the period. */
-export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { cold?: boolean; model?: string; since?: number } = {}): void {
+export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { cold?: boolean; model?: string; since?: number; agent?: string } = {}): void {
   const seenMsg = new Set<string>(), seenTool = new Set<string>();
+  const use = () => agentUse(t, opts.agent ?? "?");
   let prevReply = 0, skipped = false;
   for (const line of readFileSync(file, "utf8").split("\n")) {
     if (!line.trim()) continue;
@@ -80,6 +96,12 @@ export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { c
         if (ECO_TOOL.test(c.name)) t.ecoCalls++;
         const key = (isSub ? "sub:" : "") + String(c.name).replace(ECO_TOOL, "eco:");
         t.tools[key] = (t.tools[key] ?? 0) + 1;
+        if ((c.name === "Agent" || c.name === "Task") && typeof c.input?.model === "string") {
+          const a = agentUse(t, String(c.input.subagent_type ?? "general-purpose"));
+          a.forced[c.input.model] = (a.forced[c.input.model] ?? 0) + 1;
+        }
+        if (isSub && (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(c.name) || /__edit$/.test(c.name))) use().edits++;
+        else if (isSub && c.name === "Bash") use().bash++;
       }
     }
     const u = m.usage;
@@ -94,6 +116,7 @@ export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { c
     t.tokens += inp + w5m + w1h + read + out;
     const ctx = inp + w5m + w1h + read, lv = t.levers, ts = o.timestamp ? Date.parse(o.timestamp) : 0;
     if (seenMsg.size === 1 && !skipped) { if (isSub) lv.startSubs.push(ctx); else lv.startMain = ctx; }
+    if (isSub && seenMsg.size === 1) use().launches++;
     if (isSub) t.subagentTurns++; else { t.turns++; t.peakContext = Math.max(t.peakContext, ctx); t.model ||= m.model; }
     const gap = prevReply && ts ? ts - prevReply : 0;
     if (ts) prevReply = ts;
@@ -114,7 +137,12 @@ export function addLog(t: SessionTotals, file: string, isSub: boolean, opts: { c
       read: read * p.cacheRead / 1e6, output: out * p.output / 1e6 };
     const c = k.input + k.write + k.read + k.output;
     t.cost += c;
-    if (isSub) { t.costSub += c; const r = lv.subByModel[modelKey(m.model)]; r.cost = (r.cost ?? 0) + c; }
+    if (isSub) {
+      t.costSub += c; const r = lv.subByModel[modelKey(m.model)]; r.cost = (r.cost ?? 0) + c;
+      const a = use(), x = (a.byModel[modelKey(m.model)] ??= { input: 0, write5m: 0, write1h: 0, read: 0, output: 0, cost: 0 });
+      a.turns++; a.cost += c;
+      x.input += inp; x.write5m += w5m; x.write1h += w1h; x.read += read; x.output += out; x.cost = (x.cost ?? 0) + c;
+    }
     for (const key of ["input", "write", "read", "output"] as const) t.costKind[key] += k[key];
   }
 }
@@ -128,7 +156,7 @@ export function subagentLogs(mainLog: string): string[] {
 export function sessionTotals(mainLog: string, opts: { cold?: boolean; model?: string; since?: number } = {}): SessionTotals {
   const t = emptyTotals(mainLog.split(/[\\/]/).pop()!.replace(/\.jsonl$/, ""));
   addLog(t, mainLog, false, opts);
-  for (const f of subagentLogs(mainLog)) addLog(t, f, true, opts);
+  for (const f of subagentLogs(mainLog)) addLog(t, f, true, { ...opts, agent: agentType(f) });
   return t;
 }
 

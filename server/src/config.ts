@@ -32,6 +32,9 @@ export interface Config {
   /** minTokens: a whole-file read is only redirected if the file is ALSO above this size (estimated tokens):
    *  below it, the refused call + retry costs a turn and saves less than it costs (adoption bench, 2026-10-27). */
   hook: { mode: "off" | "redirect"; lineThreshold: number; minTokens?: number };
+  /** maxExplicitModel: an explicit `model` above this tier in a subagent launch is dropped by the hook, so the
+   *  agent's own `model:` or CLAUDE_CODE_SUBAGENT_MODEL applies again. "" = off. */
+  subagents: { maxExplicitModel: "" | "haiku" | "sonnet" | "opus" };
   /** Language of the terminal texts (/eco-stats, status line): "auto" = from LANG / LC_ALL. */
   lang: "auto" | "en" | "fr";
 }
@@ -49,6 +52,7 @@ export const DEFAULT_CONFIG: Config = {
   port: 4777,
   // 9600 tokens × 2.5 chars = 24K characters: the size threshold validated by the adoption bench (was 6000 × 4).
   hook: { mode: "redirect", lineThreshold: 300, minTokens: 9600 },
+  subagents: { maxExplicitModel: "" },
   lang: "auto",
 };
 
@@ -73,6 +77,7 @@ export function readConfig(): Config {
       laterTurns: Number.isFinite(c.laterTurns) ? c.laterTurns : DEFAULT_CONFIG.laterTurns,
       port: Number.isFinite(c.port) ? c.port : DEFAULT_CONFIG.port,
       hook,
+      subagents: { maxExplicitModel: ["haiku", "sonnet", "opus"].includes(c.subagents?.maxExplicitModel) ? c.subagents.maxExplicitModel : "" },
       lang: c.lang === "en" || c.lang === "fr" ? c.lang : "auto",
     };
     if (old) writeFileSync(f, JSON.stringify(cfg, null, 2) + "\n");

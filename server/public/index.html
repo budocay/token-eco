@@ -129,6 +129,8 @@ td.n,th.n{text-align:right}.ok{color:var(--acc)}.ko{color:var(--bad)}
     </div>
     <section class="card"><h2>Levers <span>biggest cost drivers in your logs, and the Claude Code setting (settings.json "env") that acts on each</span></h2>
       <div id="levers"></div></section>
+    <section class="card"><h2>Subagent models <span>what each subagent type ran on, and the cheaper model its role suggests · apply with /eco-models</span></h2>
+      <div id="agentModels"></div></section>
     <section class="card"><h2>With vs without token-eco <span>same project and model only · medians per turn (subagent turns included)</span></h2>
       <p id="verdict" style="font:13px var(--mono);margin:0 0 12px"></p><div id="groups"></div></section>
     <section class="card"><h2>Sessions <span>coverage = token-eco share of file reads / searches / edits</span></h2><div id="realRecent"></div></section>
@@ -221,6 +223,12 @@ const FR = {
   "Huge contexts (main thread)": "Contextes énormes (fil principal)", "{0} above 300K": "{0} au-delà de 300K", "{0} above 200K": "{0} au-delà de 200K",
   "Every turn re-reads the whole context; median peak {0}. Compacting earlier (or /clear between tasks) cuts it.":
     "Chaque tour relit tout le contexte ; pic médian {0}. Compacter plus tôt (ou /clear entre deux tâches) le réduit.",
+  "Subagent models": "Modèles des sous-agents", "Agent": "Agent", "Launches": "Lancements", "Ran on": "A tourné sur",
+  "what each subagent type ran on, and the cheaper model its role suggests · apply with /eco-models": "modèle réellement utilisé par type de sous-agent, et modèle moins cher que son rôle suggère · appliquer avec /eco-models",
+  "Model forced at launch": "Modèle forcé au lancement", "Suggested": "Suggéré", "Saving": "Économie",
+  "judgment": "jugement", "read-only": "lecture seule", "work": "travail",
+  "Suggested from the role only (read-only → Haiku, the rest → Sonnet): answer quality is not measured. A model forced at launch overrides the agent's own model and CLAUDE_CODE_SUBAGENT_MODEL.":
+    "Suggéré d'après le rôle seulement (lecture seule → Haiku, le reste → Sonnet) : la qualité des réponses n'est pas mesurée. Un modèle forcé au lancement passe avant le modèle de l'agent et CLAUDE_CODE_SUBAGENT_MODEL.",
   "Subagent model": "Modèle des sous-agents", "{0} saved": "{0} économisés", "with {0}": "avec {0}", "No subagent.": "Aucun sous-agent.",
   "Cache expired during long commands": "Cache expiré pendant les longues commandes", "{0} rewrites": "{0} réécritures",
   "Context rewritten after >5 min without a reply (tests, builds). A 1-hour cache avoids most of it, but its writes cost 2× input instead of 1.25×.":
@@ -480,6 +488,17 @@ function renderSessions(s) {
       t("System prompt, tools, skills, CLAUDE.md: {0} (main), {1} per subagent ({2} started).", tok(L.start.main), tok(L.start.sub), nf.format(L.start.subagents)),
       `<small>${t("disable unused plugins / skills")}</small>`)}</table>
     <p class="note" style="margin:10px 0 0">${t("Measured over the sessions shown, before any change: once a setting is on, new sessions should make its figure shrink.")}</p>`;
+
+  const am = s.agentModels || [];
+  $("agentModels").innerHTML = am.length ? `<table><tr><th>${t("Agent")}</th><th class="n">${t("Launches")}</th><th class="n">${t("Measured")}</th><th>${t("Ran on")}</th>
+    <th>${t("Model forced at launch")}</th><th>${t("Suggested")}</th><th class="n">${t("Saving")}</th></tr>
+    ${am.slice(0, 15).map((x) => `<tr><td><b>${esc(x.agent)}</b><br><small style="color:var(--muted)">${t(x.role)}</small></td>
+      <td class="n">${nf.format(x.launches)}</td><td class="n">${usd(x.cost)}</td>
+      <td>${x.models.map((m) => `${esc(label(m.model))} ${usd(m.cost)}`).join(" · ")}</td>
+      <td>${Object.entries(x.forced).map(([m, n]) => `${esc(m)} ×${n}`).join(" · ") || "–"}</td>
+      <td>${x.suggested ? esc(label(x.suggested)) : "–"}</td><td class="n">${x.suggested ? usd(x.saving) : "–"}</td></tr>`).join("")}</table>
+    <p class="note" style="margin:10px 0 0">${t("Suggested from the role only (read-only → Haiku, the rest → Sonnet): answer quality is not measured. A model forced at launch overrides the agent's own model and CLAUDE_CODE_SUBAGENT_MODEL.")}</p>`
+    : `<p class="note">${t("No subagent.")}</p>`;
 
   const cmp = s.compare, nW = cmp.all.with.sessions, nO = cmp.all.without.sessions;
   // Verdict built here (not the server's English sentence) so that it follows the language.
